@@ -1,0 +1,47 @@
+# Database files
+memory.db
+memory.db-wal
+memory.db-shm
+
+# Knowledge (user-specific memories)
+knowledge/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pyc
+
+# uv / pip
+.venv/
+venv/
+.uv/
+uv.lock
+*.egg-info/
+*.egg
+
+# pytest
+.pytest_cache/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+*.tmp
+*.temp
+*.log
