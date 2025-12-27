@@ -31,6 +31,18 @@ Save immediately when discovering:
 
 **Skip**: Trivial info, temp notes, grep-able content, duplicates.
 
+## Mandatory Save Checkpoints
+
+BEFORE delivering any analysis, report, or completing research tasks, you MUST:
+1. Review what was discovered
+2. Save relevant findings to memory (architecture, config, gotcha, pattern, etc.)
+3. Include "**Memories saved:** [list]" in your final response
+
+If nothing worth saving was found, explicitly state: "**Memories saved:** None (reason: trivial/duplicate/grep-able)"
+
+This is NOT optional - treat memory saving as part of task completion, not an afterthought.
+Failure to save discoveries is a workflow violation.
+
 ## Other Commands
 
 ```bash
