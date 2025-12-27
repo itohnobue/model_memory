@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 
 # =============================================================================
@@ -462,15 +462,66 @@ def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[
 
 
 def escape_fts5_query(query: str) -> str:
-    """Escape special FTS5 characters and wrap in quotes for safe searching."""
+    """Escape special FTS5 characters and wrap in quotes for safe searching.
+
+    This creates an EXACT PHRASE search. For keyword OR search, use build_or_query().
+    """
     # FTS5 special characters: " * : ^ ( ) -
     # Escape by wrapping entire query in quotes after escaping internal quotes
     escaped = query.replace('"', '""')
     return f'"{escaped}"'
 
 
-def cmd_search(query: str, limit: int = 10, category: str | None = None) -> dict[str, Any]:
+def build_or_query(query: str) -> str:
+    """Build an FTS5 OR query from space-separated keywords.
+
+    Tokenizes the input and creates a query that matches ANY of the keywords.
+    Each keyword is quoted for safety and connected with OR.
+
+    Example: "vespa-linux server docker" -> '"vespa-linux" OR "server" OR "docker"'
+
+    Also supports prefix matching with * for partial matches.
+    """
+    # Handle explicit quoted phrases - pass through as-is
+    if query.startswith('"') and query.endswith('"'):
+        return escape_fts5_query(query[1:-1])
+
+    # Tokenize: split on whitespace and filter empty tokens
+    tokens = [t.strip() for t in query.split() if t.strip()]
+
+    if not tokens:
+        return '""'
+
+    if len(tokens) == 1:
+        # Single token: escape and add prefix wildcard for partial matches
+        escaped = tokens[0].replace('"', '""')
+        # Return both exact and prefix match
+        return f'"{escaped}" OR "{escaped}"*'
+
+    # Multiple tokens: create OR query with prefix matching
+    or_parts = []
+    for token in tokens:
+        escaped = token.replace('"', '""')
+        # Each token matches exact or prefix
+        or_parts.append(f'"{escaped}"')
+        or_parts.append(f'"{escaped}"*')
+
+    return " OR ".join(or_parts)
+
+
+def cmd_search(
+    query: str,
+    limit: int = 10,
+    category: str | None = None,
+    mode: str = "keywords",
+) -> dict[str, Any]:
     """Search memories using FTS5 with recency boost.
+
+    Args:
+        query: Search query string
+        limit: Maximum number of results
+        category: Optional category filter
+        mode: Search mode - "keywords" for OR search (default), "phrase" for exact phrase
 
     Ranking combines BM25 relevance with recency:
     - BM25 score measures text relevance (lower = better match)
@@ -485,8 +536,11 @@ def cmd_search(query: str, limit: int = 10, category: str | None = None) -> dict
 
     cursor = conn.cursor()
 
-    # Build FTS5 query with proper escaping
-    safe_query = escape_fts5_query(query)
+    # Build FTS5 query based on mode
+    if mode == "keywords":
+        safe_query = build_or_query(query)
+    else:
+        safe_query = escape_fts5_query(query)
 
     # Recency-boosted ranking:
     # - bm25() returns negative scores (more negative = better match)
@@ -533,8 +587,12 @@ def cmd_search(query: str, limit: int = 10, category: str | None = None) -> dict
 
 
 def cmd_context(topic: str, limit: int = 5) -> dict[str, Any]:
-    """Get a context block for a topic - formatted for injection into prompts."""
-    result = cmd_search(topic, limit=limit)
+    """Get a context block for a topic - formatted for injection into prompts.
+
+    Uses keyword (OR) search mode to find memories matching ANY of the provided
+    keywords. This is more flexible than exact phrase matching for context retrieval.
+    """
+    result = cmd_search(topic, limit=limit, mode="keywords")
 
     if not result["results"]:
         return {
@@ -882,12 +940,16 @@ def main() -> None:
 Commands:
   add <category> <content>    Add a new memory
   search <query>              Search memories (ranked by relevance + recency)
-  context <topic>             Get context block for a topic
+  context <topic>             Get context block for a topic (uses keyword OR search)
   list                        List all memories
   rebuild                     Force rebuild index
   delete <id>                 Delete a memory
   stats                       Show statistics
   maintain                    Check database health and clean old memories
+
+Search Modes:
+  --mode keywords   OR matching - finds memories with ANY keyword (default)
+  --mode phrase     Exact phrase matching
 
 Categories: {', '.join(CATEGORIES)}
 
@@ -895,7 +957,8 @@ Examples:
   memory.sh add discovery "The API uses OAuth2 with PKCE flow"
   memory.sh add gotcha "Redis connection pool must be closed explicitly" --tags redis,connection
   memory.sh search "authentication"
-  memory.sh context "database connections"
+  memory.sh search "vespa server docker" --mode keywords   # Match ANY keyword
+  memory.sh context "vespa-linux server services"          # Uses keyword mode by default
   memory.sh list --category gotcha
   memory.sh maintain --max-age 180
         """
@@ -913,6 +976,8 @@ Examples:
     parser.add_argument("--version", "-v", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--max-age", type=int, help="Max age in days for maintain command")
     parser.add_argument("--execute", action="store_true", help="Actually delete old memories (maintain command)")
+    parser.add_argument("--mode", "-m", choices=["phrase", "keywords"], default="keywords",
+                        help="Search mode: 'keywords' for OR search (default), 'phrase' for exact match")
 
     args = parser.parse_args()
 
@@ -936,7 +1001,7 @@ Examples:
                 print("Error: search requires <query>", file=sys.stderr)
                 sys.exit(1)
             query = " ".join(args.args)
-            result = cmd_search(query, limit=args.limit, category=args.category)
+            result = cmd_search(query, limit=args.limit, category=args.category, mode=args.mode)
 
         elif args.command == "context":
             if not args.args:

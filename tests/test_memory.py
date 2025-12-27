@@ -75,6 +75,40 @@ class TestEscapeFts5Query:
         assert memory.escape_fts5_query("foo:bar") == '"foo:bar"'
 
 
+class TestBuildOrQuery:
+    """Tests for build_or_query function."""
+
+    def test_single_keyword(self):
+        result = memory.build_or_query("hello")
+        assert '"hello"' in result
+        assert '"hello"*' in result
+        assert "OR" in result
+
+    def test_multiple_keywords(self):
+        result = memory.build_or_query("vespa linux docker")
+        assert '"vespa"' in result
+        assert '"linux"' in result
+        assert '"docker"' in result
+        assert result.count("OR") >= 5  # Each keyword has exact + prefix
+
+    def test_quoted_phrase_passthrough(self):
+        result = memory.build_or_query('"exact phrase"')
+        assert result == '"exact phrase"'
+
+    def test_empty_query(self):
+        result = memory.build_or_query("")
+        assert result == '""'
+
+    def test_whitespace_handling(self):
+        result = memory.build_or_query("  foo   bar  ")
+        assert '"foo"' in result
+        assert '"bar"' in result
+
+    def test_special_chars_escaped(self):
+        result = memory.build_or_query('say "hello"')
+        assert '""hello""' in result  # Quotes escaped
+
+
 class TestMemoryDataclass:
     """Tests for Memory dataclass."""
 

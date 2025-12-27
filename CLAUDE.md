@@ -1,13 +1,15 @@
 # Memory System
 
-Persistent memory across sessions.
+Persistent memory across sessions. **CRITICAL: Always retrieve context before starting non-trivial tasks.**
 
-## Before Tasks
+## Before Tasks (MANDATORY)
 
-Retrieve context (skip for trivial tasks):
+ALWAYS retrieve context before starting work (only skip for single-line trivial fixes):
 ```bash
 ./.claude/tools/memory.sh context "<keywords>"
 ```
+
+Use multiple keywords covering: server names, service names, technologies, error types, domain concepts.
 
 ## Save Memories
 
@@ -32,7 +34,7 @@ Save immediately when discovering:
 ## Other Commands
 
 ```bash
-./.claude/tools/memory.sh search "<query>"    # Find memories
+./.claude/tools/memory.sh search "<query>"    # Find memories (keyword OR search)
 ./.claude/tools/memory.sh list                # List all
 ./.claude/tools/memory.sh delete <id>         # Remove
 ./.claude/tools/memory.sh stats               # Counts

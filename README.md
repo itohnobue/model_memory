@@ -46,17 +46,27 @@ The memories are stored as human-readable Markdown files (you can read and edit 
 ./.claude/tools/memory.sh add discovery "API uses JWT with RS256"
 ./.claude/tools/memory.sh add gotcha "Redis needs explicit close()" --tags redis,pool
 
-# Search memories
-./.claude/tools/memory.sh search "authentication"
+# Search memories (keyword OR search by default)
+./.claude/tools/memory.sh search "authentication redis"      # Finds ANY keyword
+./.claude/tools/memory.sh search "JWT RS256" --mode phrase   # Exact phrase match
 
-# Get context block for a topic
-./.claude/tools/memory.sh context "database"
+# Get context block for a topic (uses keyword OR search)
+./.claude/tools/memory.sh context "vespa-linux server docker"
 
 # List and manage
 ./.claude/tools/memory.sh list --category gotcha
 ./.claude/tools/memory.sh stats
 ./.claude/tools/memory.sh delete <id>
 ```
+
+## Search Modes
+
+| Mode | Description | Example |
+|------|-------------|---------|
+| `keywords` (default) | OR search - matches ANY keyword | `search "redis auth"` finds memories with "redis" OR "auth" |
+| `phrase` | Exact phrase matching | `search "JWT token" --mode phrase` finds exact phrase |
+
+The `context` command always uses keyword mode for maximum recall.
 
 ## Memory Categories
 

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-12-28
+
+### Added
+- Keyword OR search mode: searches now match ANY keyword by default
+- `--mode` CLI argument: choose between `keywords` (default) and `phrase` modes
+- `build_or_query()` function for flexible multi-keyword FTS5 queries
+- Prefix matching with `*` wildcard for partial keyword matches
+
+### Changed
+- Default search mode changed from exact phrase to keyword OR matching
+- `context` command now uses keyword mode for better context retrieval
+- Updated help text with search mode examples
+
+### Fixed
+- Multi-keyword context queries now find relevant memories instead of requiring exact phrases
+
 ## [1.1.0] - 2024-12-27
 
 ### Added
