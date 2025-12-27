@@ -1,64 +1,64 @@
 # Model Memory
 
-Persistent long-term memory for Claude Code. Stores project knowledge across sessions using Markdown files + SQLite FTS5 search.
+Persistent long-term memory for Claude Code that remembers project knowledge across sessions.
+
+## Quick start (highly recommended)
+
+1. **Copy files to your project**: Put `.claude/` folder (with `tools/` inside) into your Claude Code working directory
+
+2. **Add instructions from CLAUDE.md to your model instructions file**: Copy the contents of `CLAUDE.md` into your project's instruction file (create one if it doesn't exist)
+
+3. **Test it**: Ask Claude Code to do any exploration task. It will automatically save important discoveries and retrieve them in future sessions.
+
+The wrapper scripts will automatically install **uv** (if needed), which handles Python and all dependencies.
+
+## What it does and why you may need it (read this first)
+
+Claude Code has a fundamental limitation: **it forgets everything between sessions**. Every time you start a new conversation, Claude rediscovers the same things about your codebase - wasting tokens and your time.
+
+This tool solves that problem by giving Claude a persistent memory that survives across sessions.
+
+**How it works**: When Claude explores your codebase, it saves important discoveries (architecture decisions, gotchas, patterns, configurations) into simple Markdown files. Next session, Claude retrieves relevant memories before starting work - so it already knows what it learned before.
+
+**Real-world benefits I've experienced**:
+- Claude stops rediscovering the same architectural patterns over and over
+- Debugging is faster because Claude remembers past investigations
+- Complex codebases become manageable as knowledge accumulates
+- Token usage drops significantly on repeated tasks
+
+The memories are stored as human-readable Markdown files (you can read and edit them yourself) with SQLite FTS5 for fast search. Everything auto-syncs - no manual database management needed.
+
+---
 
 ## Features
 
-- **Hybrid storage**: Human-readable Markdown + fast SQLite FTS5 search
-- **Smart ranking**: BM25 relevance + recency boost
-- **Auto-sync**: Database rebuilds from Markdown on every query
-- **Cross-platform**: macOS, Linux, Windows
+- **Persistent Knowledge**: Memories survive across Claude Code sessions
+- **Smart Search**: BM25 relevance ranking with recency boost
+- **Human-Readable**: All memories stored as Markdown files in `knowledge/` folder
+- **Auto-Sync**: Database rebuilds from Markdown on every query
+- **Zero Setup**: Uses uv with inline dependencies - no manual venv or pip needed
+- **Cross-Platform**: Works on macOS, Linux, and Windows
 
-## Installation
-
-```bash
-# Clone
-git clone ssh://git@git.aoizora.ru:2222/nobu/model_memory.git
-
-# Make executable (Unix)
-chmod +x .claude/tools/memory.sh
-```
-
-Requirements: Python 3.11+ (uv auto-installs on first run)
-
-## Quick Start
+## Usage
 
 ```bash
 # Add memories
-./memory.sh add discovery "API uses JWT with RS256"
-./memory.sh add gotcha "Redis needs explicit close()" --tags redis,pool
+./.claude/tools/memory.sh add discovery "API uses JWT with RS256"
+./.claude/tools/memory.sh add gotcha "Redis needs explicit close()" --tags redis,pool
 
-# Search (ranked by relevance + recency)
-./memory.sh search "authentication"
+# Search memories
+./.claude/tools/memory.sh search "authentication"
 
-# Get context block for Claude
-./memory.sh context "database"
+# Get context block for a topic
+./.claude/tools/memory.sh context "database"
 
 # List and manage
-./memory.sh list --category gotcha
-./memory.sh stats
-./memory.sh delete <id>
-./memory.sh maintain --max-age 180
+./.claude/tools/memory.sh list --category gotcha
+./.claude/tools/memory.sh stats
+./.claude/tools/memory.sh delete <id>
 ```
 
-## Usage with Claude Code
-
-Copy `.claude/` folder and `CLAUDE.md` to your project. Claude follows `CLAUDE.md` instructions automatically.
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `add <category> <content>` | Add memory (use `--tags a,b,c`) |
-| `search <query>` | Search with BM25 + recency ranking |
-| `context <topic>` | Get formatted context block |
-| `list` | List memories (use `--category`, `--limit`) |
-| `stats` | Show statistics |
-| `delete <id>` | Delete a memory |
-| `maintain` | Health check (use `--max-age N --execute`) |
-| `rebuild` | Force reindex from Markdown files |
-
-## Categories
+## Memory Categories
 
 | Category | Use For |
 |----------|---------|
@@ -69,56 +69,17 @@ Copy `.claude/` folder and `CLAUDE.md` to your project. Claude follows `CLAUDE.m
 | `config` | Environment, settings |
 | `entity` | Key classes, functions, APIs |
 | `decision` | Design rationale |
-| `todo` | Pending items |
-| `reference` | External links |
-| `context` | Project background |
 
-## Options
+## Requirements
 
-| Option | Description |
-|--------|-------------|
-| `-t, --tags` | Comma-separated tags |
-| `-l, --limit` | Limit results (default: 10) |
-| `-c, --category` | Filter by category |
-| `-o, --output` | Format: `text` or `json` |
-| `-q, --quiet` | Suppress output |
-| `--max-age` | Days threshold (maintain) |
-| `--execute` | Actually delete (maintain) |
-
-## Shell Completions
-
-```bash
-# Bash
-source .claude/tools/completions/memory.bash
-
-# Zsh
-source .claude/tools/completions/memory.zsh
-
-# Fish
-source .claude/tools/completions/memory.fish
-
-# PowerShell
-. .claude/tools/completions/memory.ps1
-```
-
-## Project Structure
-
-```
-.claude/tools/
-├── memory.py                 # Core tool
-├── memory.sh                 # Unix wrapper
-├── memory.bat                # Windows wrapper
-└── completions/              # Shell completions
-knowledge/                    # Markdown memory files
-memory.db                     # SQLite FTS5 database
-CLAUDE.md                     # AI instructions
-```
+- **uv**: Installed automatically by wrapper scripts
+- **Python 3.11+**: Installed automatically by uv if needed
 
 ## Troubleshooting
 
 **uv not found**: Auto-installs on first run. Manual: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
-**No search results**: Run `./memory.sh rebuild` to reindex.
+**No search results**: Run `./.claude/tools/memory.sh rebuild` to reindex.
 
 **Permission denied**: Run `chmod +x .claude/tools/memory.sh`
 
