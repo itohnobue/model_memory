@@ -104,13 +104,11 @@ source .claude/tools/completions/memory.fish
 ## Project Structure
 
 ```
-.claude/
-├── agents/memory-keeper.md   # Validation/cleanup agent
-└── tools/
-    ├── memory.py             # Core tool
-    ├── memory.sh             # Unix wrapper
-    ├── memory.bat            # Windows wrapper
-    └── completions/          # Shell completions
+.claude/tools/
+├── memory.py                 # Core tool
+├── memory.sh                 # Unix wrapper
+├── memory.bat                # Windows wrapper
+└── completions/              # Shell completions
 knowledge/                    # Markdown memory files
 memory.db                     # SQLite FTS5 database
 CLAUDE.md                     # AI instructions
