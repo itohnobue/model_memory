@@ -87,9 +87,7 @@ class Memory:
     category: str
     content: str
     tags: list[str] = field(default_factory=list)
-    created_at: str = ""
-    updated_at: str = ""
-    source_file: str = ""
+    changed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,8 +95,7 @@ class Memory:
             "category": self.category,
             "content": self.content,
             "tags": self.tags,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
+            "changed_at": self.changed_at,
         }
 
 
@@ -137,18 +134,12 @@ def parse_knowledge_file() -> list[Memory]:
             tags = [t.strip() for t in tag_match.group(1).split(',')]
             body = re.sub(r'^Tags:\s*.+\n?', '', body, flags=re.MULTILINE)
 
-        # Extract timestamps
-        created_at = ""
-        updated_at = ""
-        created_match = re.search(r'^Created:\s*(.+)$', body, re.MULTILINE)
-        if created_match:
-            created_at = created_match.group(1).strip()
-            body = re.sub(r'^Created:\s*.+\n?', '', body, flags=re.MULTILINE)
-
-        updated_match = re.search(r'^Updated:\s*(.+)$', body, re.MULTILINE)
-        if updated_match:
-            updated_at = updated_match.group(1).strip()
-            body = re.sub(r'^Updated:\s*.+\n?', '', body, flags=re.MULTILINE)
+        # Extract timestamp
+        changed_at = ""
+        changed_match = re.search(r'^Changed:\s*(.+)$', body, re.MULTILINE)
+        if changed_match:
+            changed_at = changed_match.group(1).strip()
+            body = re.sub(r'^Changed:\s*.+\n?', '', body, flags=re.MULTILINE)
 
         # Clean up content
         content_text = body.strip()
@@ -159,8 +150,7 @@ def parse_knowledge_file() -> list[Memory]:
                 category=category,
                 content=content_text,
                 tags=tags,
-                created_at=created_at,
-                updated_at=updated_at,
+                changed_at=changed_at,
             ))
 
     return memories
@@ -176,10 +166,8 @@ def write_knowledge_file(memories: list[Memory]) -> None:
         lines.append(f"Category: {memory.category}\n")
         if memory.tags:
             lines.append(f"Tags: {', '.join(memory.tags)}\n")
-        if memory.created_at:
-            lines.append(f"Created: {memory.created_at}\n")
-        if memory.updated_at:
-            lines.append(f"Updated: {memory.updated_at}\n")
+        if memory.changed_at:
+            lines.append(f"Changed: {memory.changed_at}\n")
         lines.append(f"\n{memory.content}\n\n")
 
     KNOWLEDGE_FILE.write_text("".join(lines), encoding="utf-8")
@@ -243,8 +231,7 @@ def init_database() -> None:
             category TEXT NOT NULL,
             content TEXT NOT NULL,
             tags TEXT,
-            created_at TEXT,
-            updated_at TEXT,
+            changed_at TEXT,
             content_hash TEXT
         )
     """)
@@ -301,12 +288,12 @@ def init_database() -> None:
 
     # Index for date-based sorting (list, maintain commands)
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_memories_changed_at ON memories(changed_at DESC)
     """)
 
     # Composite index for category + date (optimizes list --category with ORDER BY)
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_memories_cat_date ON memories(category, created_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_memories_cat_date ON memories(category, changed_at DESC)
     """)
 
     conn.commit()
@@ -358,15 +345,14 @@ def sync_from_file(conn: sqlite3.Connection, force: bool = False) -> None:
     for memory in all_memories:
         content_hash = hashlib.md5(memory.content.encode()).hexdigest()
         cursor.execute("""
-            INSERT OR REPLACE INTO memories (id, category, content, tags, created_at, updated_at, content_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO memories (id, category, content, tags, changed_at, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, (
             memory.id,
             memory.category,
             memory.content,
             ",".join(memory.tags),
-            memory.created_at,
-            memory.updated_at,
+            memory.changed_at,
             content_hash,
         ))
 
@@ -407,8 +393,7 @@ def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[
         category=safe_category,
         content=content,
         tags=tags or [],
-        created_at=now,
-        updated_at=now,
+        changed_at=now,
     )
 
     # Write to knowledge file
@@ -510,13 +495,13 @@ def cmd_search(
     # Recency-boosted ranking:
     # - bm25() returns negative scores (more negative = better match)
     # - We subtract a recency bonus (newer = larger bonus = more negative final score)
-    # - age_days = days since creation (minimum 1 to avoid division issues)
-    # - recency_bonus = 10.0 / age_days (newer memories get bigger bonus)
+    # - age_days = days since last change (minimum 1 to avoid division issues)
+    # - recency_bonus = 10.0 / age_days (recently changed memories get bigger bonus)
     recency_sql = """
-        SELECT m.id, m.category, m.content, m.tags, m.created_at, m.updated_at,
+        SELECT m.id, m.category, m.content, m.tags, m.changed_at,
                bm25(memories_fts) as bm25_score,
-               MAX(1, julianday('now') - julianday(COALESCE(m.created_at, '2020-01-01'))) as age_days,
-               bm25(memories_fts) - (10.0 / MAX(1, julianday('now') - julianday(COALESCE(m.created_at, '2020-01-01')))) as rank
+               MAX(1, julianday('now') - julianday(COALESCE(m.changed_at, '2020-01-01'))) as age_days,
+               bm25(memories_fts) - (10.0 / MAX(1, julianday('now') - julianday(COALESCE(m.changed_at, '2020-01-01')))) as rank
         FROM memories m
         JOIN memories_fts ON m.rowid = memories_fts.rowid
         WHERE memories_fts MATCH ?
@@ -537,7 +522,7 @@ def cmd_search(
             "category": row["category"],
             "content": row["content"],
             "tags": [t for t in row["tags"].split(",") if t] if row["tags"] else [],
-            "created_at": row["created_at"],
+            "changed_at": row["changed_at"],
             "age_days": int(row["age_days"]),
             "relevance": -row["bm25_score"],  # BM25 returns negative scores
         })
@@ -596,17 +581,17 @@ def cmd_list(category: str | None = None, limit: int = 50) -> dict[str, Any]:
     if category:
         safe_category = sanitize_category(category)
         cursor.execute("""
-            SELECT id, category, content, tags, created_at, updated_at
+            SELECT id, category, content, tags, changed_at
             FROM memories
             WHERE category = ?
-            ORDER BY created_at DESC
+            ORDER BY changed_at DESC
             LIMIT ?
         """, (safe_category, limit))
     else:
         cursor.execute("""
-            SELECT id, category, content, tags, created_at, updated_at
+            SELECT id, category, content, tags, changed_at
             FROM memories
-            ORDER BY created_at DESC
+            ORDER BY changed_at DESC
             LIMIT ?
         """, (limit,))
 
@@ -617,7 +602,7 @@ def cmd_list(category: str | None = None, limit: int = 50) -> dict[str, Any]:
             "category": row["category"],
             "content": row["content"][:100] + "..." if len(row["content"]) > 100 else row["content"],
             "tags": [t for t in row["tags"].split(",") if t] if row["tags"] else [],
-            "created_at": row["created_at"],
+            "changed_at": row["changed_at"],
         })
 
     conn.close()
@@ -701,27 +686,22 @@ def cmd_stats() -> dict[str, Any]:
     }
 
 
-def cmd_maintain(max_age_days: int | None = None, dry_run: bool = True) -> dict[str, Any]:
-    """Maintain database: analyze age distribution and optionally clean old memories.
-
-    Args:
-        max_age_days: If set, identify/delete memories older than this
-        dry_run: If True, only report what would be deleted (default)
-    """
+def cmd_maintain() -> dict[str, Any]:
+    """Maintain database: analyze age distribution and check health."""
     init_database()
     conn = get_db_connection()
     sync_from_file(conn)
 
     cursor = conn.cursor()
 
-    # Age distribution
+    # Age distribution (based on last change)
     cursor.execute("""
         SELECT
             CASE
-                WHEN julianday('now') - julianday(COALESCE(created_at, '2020-01-01')) <= 7 THEN 'last_week'
-                WHEN julianday('now') - julianday(COALESCE(created_at, '2020-01-01')) <= 30 THEN 'last_month'
-                WHEN julianday('now') - julianday(COALESCE(created_at, '2020-01-01')) <= 90 THEN 'last_quarter'
-                WHEN julianday('now') - julianday(COALESCE(created_at, '2020-01-01')) <= 365 THEN 'last_year'
+                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 7 THEN 'last_week'
+                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 30 THEN 'last_month'
+                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 90 THEN 'last_quarter'
+                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 365 THEN 'last_year'
                 ELSE 'older'
             END as age_bucket,
             COUNT(*) as count
@@ -739,42 +719,6 @@ def cmd_maintain(max_age_days: int | None = None, dry_run: bool = True) -> dict[
         "age_distribution": age_distribution,
         "total_memories": sum(age_distribution.values()),
     }
-
-    # If max_age specified, find old memories
-    if max_age_days is not None:
-        cursor.execute("""
-            SELECT id, category, content, created_at,
-                   CAST(julianday('now') - julianday(COALESCE(created_at, '2020-01-01')) AS INTEGER) as age_days
-            FROM memories
-            WHERE julianday('now') - julianday(COALESCE(created_at, '2020-01-01')) > ?
-            ORDER BY age_days DESC
-        """, (max_age_days,))
-
-        old_memories = []
-        for row in cursor.fetchall():
-            old_memories.append({
-                "id": row["id"],
-                "category": row["category"],
-                "content": row["content"][:80] + "..." if len(row["content"]) > 80 else row["content"],
-                "age_days": row["age_days"],
-            })
-
-        result["old_memories"] = old_memories
-        result["old_count"] = len(old_memories)
-        result["max_age_days"] = max_age_days
-        result["dry_run"] = dry_run
-
-        # Delete if not dry run
-        if not dry_run and old_memories:
-            deleted = 0
-            for mem in old_memories:
-                if delete_memory_from_file(mem["id"]):
-                    deleted += 1
-            sync_from_file(conn, force=True)
-            result["deleted"] = deleted
-            result["message"] = f"Deleted {deleted} memories older than {max_age_days} days"
-        elif old_memories:
-            result["message"] = f"Found {len(old_memories)} memories older than {max_age_days} days (dry run - use --execute to delete)"
 
     # Database integrity check
     cursor.execute("PRAGMA integrity_check")
@@ -842,7 +786,7 @@ def format_output(data: dict[str, Any], output_format: str = "text") -> str:
     if "age_distribution" in data:
         lines = ["Database Maintenance Report", "=" * 30]
         lines.append(f"\nTotal memories: {data['total_memories']}")
-        lines.append("\nAge distribution:")
+        lines.append("\nAge distribution (by last change):")
         order = ["last_week", "last_month", "last_quarter", "last_year", "older"]
         labels = {"last_week": "< 1 week", "last_month": "< 1 month", "last_quarter": "< 3 months",
                   "last_year": "< 1 year", "older": "> 1 year"}
@@ -852,18 +796,6 @@ def format_output(data: dict[str, Any], output_format: str = "text") -> str:
 
         lines.append(f"\nDatabase integrity: {data.get('db_integrity', 'unknown')}")
         lines.append(f"Index synced: {'Yes' if data.get('index_synced') else 'No'}")
-
-        if "old_memories" in data:
-            lines.append(f"\nMemories older than {data['max_age_days']} days: {data['old_count']}")
-            if data["old_memories"]:
-                for mem in data["old_memories"][:10]:  # Show max 10
-                    lines.append(f"  [{mem['category']}] {mem['id']} ({mem['age_days']}d)")
-                    lines.append(f"    {mem['content']}")
-                if len(data["old_memories"]) > 10:
-                    lines.append(f"  ... and {len(data['old_memories']) - 10} more")
-
-        if "message" in data:
-            lines.append(f"\n{data['message']}")
 
         return "\n".join(lines)
 
@@ -896,7 +828,7 @@ Commands:
   rebuild                     Force rebuild index
   delete <id>                 Delete a memory
   stats                       Show statistics
-  maintain                    Check database health and clean old memories
+  maintain                    Check database health
 
 Search Modes:
   --mode keywords   OR matching - finds memories with ANY keyword (default)
@@ -911,7 +843,7 @@ Examples:
   memory.sh search "vespa server docker" --mode keywords   # Match ANY keyword
   memory.sh context "vespa-linux server services"          # Uses keyword mode by default
   memory.sh list --category gotcha
-  memory.sh maintain --max-age 180
+  memory.sh maintain
         """
     )
 
@@ -925,8 +857,6 @@ Examples:
                         help="Output format")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress non-essential output")
     parser.add_argument("--version", "-v", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--max-age", type=int, help="Max age in days for maintain command")
-    parser.add_argument("--execute", action="store_true", help="Actually delete old memories (maintain command)")
     parser.add_argument("--mode", "-m", choices=["phrase", "keywords"], default="keywords",
                         help="Search mode: 'keywords' for OR search (default), 'phrase' for exact match")
 
@@ -977,7 +907,7 @@ Examples:
             result = cmd_stats()
 
         elif args.command == "maintain":
-            result = cmd_maintain(max_age_days=args.max_age, dry_run=not args.execute)
+            result = cmd_maintain()
 
         # Check for error status and exit appropriately
         is_error = result.get("status") == "error"

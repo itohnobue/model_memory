@@ -9,11 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Breaking**: Switched from multiple category files (`knowledge/*.md`) to single file (`knowledge.md`)
-- Memory entries now include `Category:` metadata line
+- **Breaking**: Replaced `created_at`/`updated_at` with single `changed_at` timestamp
+- Memory entries now include `Category:` and `Changed:` metadata lines
 - Simplified codebase by removing multi-file management logic
+- Age distribution in `maintain` now based on last change, not creation date
+- Recency boost in search now favors recently modified memories
 
 ### Removed
 - `knowledge/` directory structure (replaced by single `knowledge.md` file)
+- `--max-age` and `--execute` options from `maintain` command
 - Migration support for old format
 
 ## [1.2.0] - 2025-12-28

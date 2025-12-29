@@ -118,8 +118,7 @@ class TestMemoryDataclass:
             category="discovery",
             content="Test content",
             tags=["tag1", "tag2"],
-            created_at="2024-01-01T00:00:00",
-            updated_at="2024-01-01T00:00:00"
+            changed_at="2024-01-01T00:00:00"
         )
         result = mem.to_dict()
 
@@ -127,6 +126,7 @@ class TestMemoryDataclass:
         assert result["category"] == "discovery"
         assert result["content"] == "Test content"
         assert result["tags"] == ["tag1", "tag2"]
+        assert result["changed_at"] == "2024-01-01T00:00:00"
 
     def test_default_tags(self):
         mem = memory.Memory(id="test", category="test", content="test")
