@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"
 
 
 # =============================================================================
@@ -43,7 +43,7 @@ __version__ = "1.2.0"
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
-KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
+KNOWLEDGE_FILE = PROJECT_ROOT / "knowledge.md"
 DB_PATH = PROJECT_ROOT / "memory.db"
 
 # Categories for organizing knowledge
@@ -106,28 +106,15 @@ class Memory:
 # MARKDOWN FILE OPERATIONS
 # =============================================================================
 
-def ensure_knowledge_dir() -> None:
-    """Ensure knowledge directory exists."""
-    KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def get_category_file(category: str) -> Path:
-    """Get the markdown file path for a category."""
-    safe_category = sanitize_category(category)
-    return KNOWLEDGE_DIR / f"{safe_category}.md"
-
-
-def parse_markdown_file(filepath: Path) -> list[Memory]:
-    """Parse a markdown file into memory entries."""
+def parse_knowledge_file() -> list[Memory]:
+    """Parse the knowledge file into memory entries."""
     memories = []
-    if not filepath.exists():
+    if not KNOWLEDGE_FILE.exists():
         return memories
 
-    content = filepath.read_text(encoding="utf-8")
-    category = filepath.stem
+    content = KNOWLEDGE_FILE.read_text(encoding="utf-8")
 
     # Split by memory entry markers (## followed by ID)
-    # Use \Z for end-of-string ($ matches end-of-line with MULTILINE)
     pattern = r'^## \[([^\]]+)\](.*?)(?=^## \[|\Z)'
     matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
 
@@ -135,6 +122,13 @@ def parse_markdown_file(filepath: Path) -> list[Memory]:
         body = body.strip()
         if not body:
             continue
+
+        # Extract category (required in single-file format)
+        category = "misc"
+        cat_match = re.search(r'^Category:\s*(.+)$', body, re.MULTILINE)
+        if cat_match:
+            category = sanitize_category(cat_match.group(1).strip())
+            body = re.sub(r'^Category:\s*.+\n?', '', body, flags=re.MULTILINE)
 
         # Extract tags if present
         tags = []
@@ -167,19 +161,33 @@ def parse_markdown_file(filepath: Path) -> list[Memory]:
                 tags=tags,
                 created_at=created_at,
                 updated_at=updated_at,
-                source_file=str(filepath),
             ))
 
     return memories
 
 
-def write_memory_to_file(memory: Memory) -> None:
-    """Write or update a memory entry in its category file."""
-    ensure_knowledge_dir()
-    filepath = get_category_file(memory.category)
+def write_knowledge_file(memories: list[Memory]) -> None:
+    """Write all memories to the knowledge file."""
+    lines = ["# Knowledge Base\n"]
+    lines.append(f"Last updated: {datetime.now().isoformat()}\n\n")
 
-    # Read existing content
-    existing_memories = parse_markdown_file(filepath)
+    for memory in memories:
+        lines.append(f"## [{memory.id}]\n")
+        lines.append(f"Category: {memory.category}\n")
+        if memory.tags:
+            lines.append(f"Tags: {', '.join(memory.tags)}\n")
+        if memory.created_at:
+            lines.append(f"Created: {memory.created_at}\n")
+        if memory.updated_at:
+            lines.append(f"Updated: {memory.updated_at}\n")
+        lines.append(f"\n{memory.content}\n\n")
+
+    KNOWLEDGE_FILE.write_text("".join(lines), encoding="utf-8")
+
+
+def add_memory_to_file(memory: Memory) -> None:
+    """Add or update a memory in the knowledge file."""
+    existing_memories = parse_knowledge_file()
 
     # Check if memory already exists (update) or is new (add)
     found = False
@@ -192,56 +200,22 @@ def write_memory_to_file(memory: Memory) -> None:
     if not found:
         existing_memories.append(memory)
 
-    # Write back to file
-    write_memories_to_file(filepath, existing_memories)
+    write_knowledge_file(existing_memories)
 
 
-def write_memories_to_file(filepath: Path, memories: list[Memory]) -> None:
-    """Write all memories to a markdown file."""
-    ensure_knowledge_dir()
-
-    lines = [f"# {filepath.stem.title()} Knowledge\n"]
-    lines.append(f"Last updated: {datetime.now().isoformat()}\n\n")
-
-    for memory in memories:
-        lines.append(f"## [{memory.id}]\n")
-        if memory.tags:
-            lines.append(f"Tags: {', '.join(memory.tags)}\n")
-        if memory.created_at:
-            lines.append(f"Created: {memory.created_at}\n")
-        if memory.updated_at:
-            lines.append(f"Updated: {memory.updated_at}\n")
-        lines.append(f"\n{memory.content}\n\n")
-
-    filepath.write_text("".join(lines), encoding="utf-8")
-
-
-def delete_memory_from_file(memory_id: str, category: str) -> bool:
-    """Delete a memory from its category file."""
-    filepath = get_category_file(category)
-    if not filepath.exists():
+def delete_memory_from_file(memory_id: str) -> bool:
+    """Delete a memory from the knowledge file."""
+    if not KNOWLEDGE_FILE.exists():
         return False
 
-    memories = parse_markdown_file(filepath)
+    memories = parse_knowledge_file()
     original_count = len(memories)
     memories = [m for m in memories if m.id != memory_id]
 
     if len(memories) < original_count:
-        write_memories_to_file(filepath, memories)
+        write_knowledge_file(memories)
         return True
     return False
-
-
-def load_all_memories_from_files() -> list[Memory]:
-    """Load all memories from all markdown files."""
-    ensure_knowledge_dir()
-    all_memories = []
-
-    for md_file in KNOWLEDGE_DIR.glob("*.md"):
-        memories = parse_markdown_file(md_file)
-        all_memories.extend(memories)
-
-    return all_memories
 
 
 # =============================================================================
@@ -348,32 +322,24 @@ def compute_file_hash(filepath: Path) -> str:
 
 
 def needs_sync(conn: sqlite3.Connection) -> bool:
-    """Check if any markdown files have changed since last sync."""
+    """Check if knowledge file has changed since last sync."""
     cursor = conn.cursor()
 
-    # Check all markdown files
-    for md_file in KNOWLEDGE_DIR.glob("*.md"):
-        current_hash = compute_file_hash(md_file)
-        cursor.execute(
-            "SELECT hash FROM file_hashes WHERE filepath = ?",
-            (str(md_file),)
-        )
-        row = cursor.fetchone()
+    current_hash = compute_file_hash(KNOWLEDGE_FILE)
+    cursor.execute(
+        "SELECT hash FROM file_hashes WHERE filepath = ?",
+        (str(KNOWLEDGE_FILE),)
+    )
+    row = cursor.fetchone()
 
-        if row is None or row["hash"] != current_hash:
-            return True
-
-    # Check for deleted files
-    cursor.execute("SELECT filepath FROM file_hashes")
-    for row in cursor.fetchall():
-        if not Path(row["filepath"]).exists():
-            return True
+    if row is None or row["hash"] != current_hash:
+        return True
 
     return False
 
 
-def sync_from_files(conn: sqlite3.Connection, force: bool = False) -> None:
-    """Sync database from markdown files."""
+def sync_from_file(conn: sqlite3.Connection, force: bool = False) -> None:
+    """Sync database from knowledge file."""
     if not force and not needs_sync(conn):
         return
 
@@ -385,8 +351,8 @@ def sync_from_files(conn: sqlite3.Connection, force: bool = False) -> None:
     # Rebuild FTS index
     cursor.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
 
-    # Load all memories from files
-    all_memories = load_all_memories_from_files()
+    # Load all memories from file
+    all_memories = parse_knowledge_file()
 
     # Insert into database
     for memory in all_memories:
@@ -404,13 +370,12 @@ def sync_from_files(conn: sqlite3.Connection, force: bool = False) -> None:
             content_hash,
         ))
 
-    # Update file hashes
+    # Update file hash
     cursor.execute("DELETE FROM file_hashes")
-    for md_file in KNOWLEDGE_DIR.glob("*.md"):
-        cursor.execute(
-            "INSERT INTO file_hashes (filepath, hash, last_sync) VALUES (?, ?, ?)",
-            (str(md_file), compute_file_hash(md_file), datetime.now().isoformat())
-        )
+    cursor.execute(
+        "INSERT INTO file_hashes (filepath, hash, last_sync) VALUES (?, ?, ?)",
+        (str(KNOWLEDGE_FILE), compute_file_hash(KNOWLEDGE_FILE), datetime.now().isoformat())
+    )
 
     conn.commit()
 
@@ -446,12 +411,12 @@ def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[
         updated_at=now,
     )
 
-    # Write to markdown file
-    write_memory_to_file(memory)
+    # Write to knowledge file
+    add_memory_to_file(memory)
 
     # Sync to database
     conn = get_db_connection()
-    sync_from_files(conn, force=True)
+    sync_from_file(conn, force=True)
     conn.close()
 
     return {
@@ -532,7 +497,7 @@ def cmd_search(
     conn = get_db_connection()
 
     # Auto-sync before search
-    sync_from_files(conn)
+    sync_from_file(conn)
 
     cursor = conn.cursor()
 
@@ -624,7 +589,7 @@ def cmd_list(category: str | None = None, limit: int = 50) -> dict[str, Any]:
     conn = get_db_connection()
 
     # Auto-sync
-    sync_from_files(conn)
+    sync_from_file(conn)
 
     cursor = conn.cursor()
 
@@ -668,7 +633,7 @@ def cmd_rebuild() -> dict[str, Any]:
     """Force rebuild the index from markdown files."""
     init_database()
     conn = get_db_connection()
-    sync_from_files(conn, force=True)
+    sync_from_file(conn, force=True)
 
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) as count FROM memories")
@@ -688,24 +653,10 @@ def cmd_delete(memory_id: str) -> dict[str, Any]:
     init_database()
     conn = get_db_connection()
 
-    # Find the memory first
-    cursor = conn.cursor()
-    cursor.execute("SELECT category FROM memories WHERE id = ?", (memory_id,))
-    row = cursor.fetchone()
-
-    if not row:
-        conn.close()
-        return {
-            "status": "error",
-            "message": f"Memory not found: {memory_id}",
-        }
-
-    category = row["category"]
-
-    # Delete from markdown file
-    if delete_memory_from_file(memory_id, category):
+    # Delete from knowledge file
+    if delete_memory_from_file(memory_id):
         # Sync database
-        sync_from_files(conn, force=True)
+        sync_from_file(conn, force=True)
         conn.close()
         return {
             "status": "success",
@@ -723,7 +674,7 @@ def cmd_stats() -> dict[str, Any]:
     """Get statistics about the memory database."""
     init_database()
     conn = get_db_connection()
-    sync_from_files(conn)
+    sync_from_file(conn)
 
     cursor = conn.cursor()
 
@@ -745,7 +696,7 @@ def cmd_stats() -> dict[str, Any]:
     return {
         "total_memories": total,
         "by_category": by_category,
-        "knowledge_dir": str(KNOWLEDGE_DIR),
+        "knowledge_file": str(KNOWLEDGE_FILE),
         "database": str(DB_PATH),
     }
 
@@ -759,7 +710,7 @@ def cmd_maintain(max_age_days: int | None = None, dry_run: bool = True) -> dict[
     """
     init_database()
     conn = get_db_connection()
-    sync_from_files(conn)
+    sync_from_file(conn)
 
     cursor = conn.cursor()
 
@@ -817,9 +768,9 @@ def cmd_maintain(max_age_days: int | None = None, dry_run: bool = True) -> dict[
         if not dry_run and old_memories:
             deleted = 0
             for mem in old_memories:
-                if delete_memory_from_file(mem["id"], mem["category"]):
+                if delete_memory_from_file(mem["id"]):
                     deleted += 1
-            sync_from_files(conn, force=True)
+            sync_from_file(conn, force=True)
             result["deleted"] = deleted
             result["message"] = f"Deleted {deleted} memories older than {max_age_days} days"
         elif old_memories:

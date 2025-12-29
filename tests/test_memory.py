@@ -22,18 +22,18 @@ def temp_project():
 
     # Override paths
     original_project_root = memory.PROJECT_ROOT
-    original_knowledge_dir = memory.KNOWLEDGE_DIR
+    original_knowledge_file = memory.KNOWLEDGE_FILE
     original_db_path = memory.DB_PATH
 
     memory.PROJECT_ROOT = Path(temp_dir)
-    memory.KNOWLEDGE_DIR = Path(temp_dir) / "knowledge"
+    memory.KNOWLEDGE_FILE = Path(temp_dir) / "knowledge.md"
     memory.DB_PATH = Path(temp_dir) / "memory.db"
 
     yield temp_dir
 
     # Restore original paths
     memory.PROJECT_ROOT = original_project_root
-    memory.KNOWLEDGE_DIR = original_knowledge_dir
+    memory.KNOWLEDGE_FILE = original_knowledge_file
     memory.DB_PATH = original_db_path
 
     # Cleanup

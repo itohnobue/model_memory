@@ -4,7 +4,7 @@ memory.db-wal
 memory.db-shm
 
 # Knowledge (user-specific memories)
-knowledge/
+knowledge.md
 
 # Python
 __pycache__/

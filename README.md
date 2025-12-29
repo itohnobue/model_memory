@@ -18,7 +18,7 @@ Claude Code has a fundamental limitation: **it forgets everything between sessio
 
 This tool solves that problem by giving Claude a persistent memory that survives across sessions.
 
-**How it works**: When Claude explores your codebase, it saves important discoveries (architecture decisions, gotchas, patterns, configurations) into simple Markdown files. Next session, Claude retrieves relevant memories before starting work - so it already knows what it learned before.
+**How it works**: When Claude explores your codebase, it saves important discoveries (architecture decisions, gotchas, patterns, configurations) into a single Markdown file (`knowledge.md`). Next session, Claude retrieves relevant memories before starting work - so it already knows what it learned before.
 
 **Real-world benefits I've experienced**:
 - Claude stops rediscovering the same architectural patterns over and over
@@ -26,7 +26,7 @@ This tool solves that problem by giving Claude a persistent memory that survives
 - Complex codebases become manageable as knowledge accumulates
 - Token usage drops significantly on repeated tasks
 
-The memories are stored as human-readable Markdown files (you can read and edit them yourself) with SQLite FTS5 for fast search. Everything auto-syncs - no manual database management needed.
+The memories are stored in a single human-readable Markdown file (`knowledge.md`) that you can read and edit yourself, with SQLite FTS5 for fast search. Everything auto-syncs - no manual database management needed.
 
 ---
 
@@ -34,7 +34,7 @@ The memories are stored as human-readable Markdown files (you can read and edit 
 
 - **Persistent Knowledge**: Memories survive across Claude Code sessions
 - **Smart Search**: BM25 relevance ranking with recency boost
-- **Human-Readable**: All memories stored as Markdown files in `knowledge/` folder
+- **Human-Readable**: All memories stored in a single `knowledge.md` file
 - **Auto-Sync**: Database rebuilds from Markdown on every query
 - **Zero Setup**: Uses uv with inline dependencies - no manual venv or pip needed
 - **Cross-Platform**: Works on macOS, Linux, and Windows
