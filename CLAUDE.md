@@ -1,19 +1,18 @@
 # Memory System
 
-Persistent memory across sessions. **CRITICAL: Always retrieve context before starting non-trivial tasks.**
+Two-tier memory: **Long-term Knowledge** (`knowledge.md`) and **Session Memory** (`session.md`).
 
-## Before Tasks (MANDATORY)
+## Long-term Knowledge
 
-ALWAYS retrieve context before starting work (only skip for single-line trivial fixes):
+Permanent memory across sessions.
+
+### Before Tasks (MANDATORY)
+
 ```bash
 ./.claude/tools/memory.sh context "<keywords>"
 ```
 
-Use multiple keywords covering: server names, service names, technologies, error types, domain concepts.
-
-## Save Memories
-
-Save immediately when discovering:
+### Save Discoveries
 
 | Category | Example |
 |----------|---------|
@@ -29,27 +28,67 @@ Save immediately when discovering:
 ./.claude/tools/memory.sh add <category> "<content>" [--tags a,b,c]
 ```
 
-**Skip**: Trivial info, temp notes, grep-able content, duplicates.
+**Skip**: Trivial info, grep-able content, duplicates.
 
-## Mandatory Save Checkpoints
+### Mandatory Save Checkpoints
 
-BEFORE delivering any analysis, report, or completing research tasks, you MUST:
-1. Review what was discovered
-2. Save relevant findings to memory (architecture, config, gotcha, pattern, etc.)
-3. Include "**Memories saved:** [list]" in your final response
+BEFORE completing any task: save relevant findings and include "**Memories saved:** [list]" in response.
 
-If nothing worth saving was found, explicitly state: "**Memories saved:** None (reason: trivial/duplicate/grep-able)"
-
-This is NOT optional - treat memory saving as part of task completion, not an afterthought.
-Failure to save discoveries is a workflow violation.
-
-## Other Commands
+### Other Commands
 
 ```bash
-./.claude/tools/memory.sh search "<query>"    # Find memories (keyword OR search)
-./.claude/tools/memory.sh list                # List all
-./.claude/tools/memory.sh delete <id>         # Remove
-./.claude/tools/memory.sh stats               # Counts
+./.claude/tools/memory.sh search "<query>"
+./.claude/tools/memory.sh list [--category CAT]
+./.claude/tools/memory.sh delete <id>
 ```
 
-When memories become stale, verify against codebase and delete/update as needed.
+---
+
+## Session Memory
+
+Temporary work state that survives context compaction. Clear when work completes.
+
+### Categories
+
+| Category | Purpose |
+|----------|---------|
+| `plan` | Implementation plans, task breakdowns |
+| `todo` | Tasks with status: `pending` / `in_progress` / `completed` / `blocked` |
+| `progress` | Log of completed work |
+| `note` | General session info |
+| `blocker` | Issues blocking progress |
+
+### Commands
+
+```bash
+# Add
+./.claude/tools/memory.sh session add plan "1. Add auth 2. Add tests"
+./.claude/tools/memory.sh session add todo "Implement JWT" --status pending
+
+# View
+./.claude/tools/memory.sh session show
+./.claude/tools/memory.sh session list [--category todo] [--status pending]
+
+# Manage
+./.claude/tools/memory.sh session update <id> --status completed
+./.claude/tools/memory.sh session delete <id>
+./.claude/tools/memory.sh session archive <id> [--category gotcha]  # Move to knowledge
+./.claude/tools/memory.sh session clear
+```
+
+### When to Use Which
+
+**Session**: Current task plans, WIP todos, progress logs, blockers.
+**Long-term**: Architecture, patterns, gotchas, configs, decisions with lasting impact.
+
+### Save Often (CRITICAL)
+
+Session memory survives context compaction. Save state frequently so work can resume from any point:
+
+1. **Start of task**: Save plan with all steps
+2. **Before each step**: Mark todo as `in_progress`
+3. **After each step**: Log progress, mark todo `completed`
+4. **On any blocker**: Save blocker immediately
+5. **Before responding**: Update all statuses
+
+If context is compacted or session interrupted, run `session show` to restore full state.

@@ -1,85 +1,66 @@
 # Model Memory
 
-Persistent long-term memory for Claude Code that remembers project knowledge across sessions.
+Two-tier memory system for Claude Code: **long-term knowledge** that persists across sessions, and **session memory** for tracking work-in-progress.
 
-## Quick start (highly recommended)
+## Quick Start
 
-1. **Copy files to your project**: Put `.claude/` folder (with `tools/` inside) into your Claude Code working directory
+1. **Copy files**: Put `.claude/` folder into your Claude Code working directory
+2. **Add instructions**: Copy `CLAUDE.md` contents into your project's instruction file
+3. **Test it**: Claude will automatically save discoveries and retrieve them in future sessions
 
-2. **Add instructions from CLAUDE.md to your model instructions file**: Copy the contents of `CLAUDE.md` into your project's instruction file (create one if it doesn't exist)
+The wrapper scripts auto-install **uv**, which handles Python and dependencies.
 
-3. **Test it**: Ask Claude Code to do any exploration task. It will automatically save important discoveries and retrieve them in future sessions.
+## Why You Need This
 
-The wrapper scripts will automatically install **uv** (if needed), which handles Python and all dependencies.
+Claude Code forgets everything between sessions. This tool gives it persistent memory.
 
-## What it does and why you may need it (read this first)
+- **Long-term knowledge** (`knowledge.md`): Architecture, gotchas, patterns, configs
+- **Session memory** (`session.md`): Plans, todos, progress logs for current work
 
-Claude Code has a fundamental limitation: **it forgets everything between sessions**. Every time you start a new conversation, Claude rediscovers the same things about your codebase - wasting tokens and your time.
-
-This tool solves that problem by giving Claude a persistent memory that survives across sessions.
-
-**How it works**: When Claude explores your codebase, it saves important discoveries (architecture decisions, gotchas, patterns, configurations) into a single Markdown file (`knowledge.md`). Next session, Claude retrieves relevant memories before starting work - so it already knows what it learned before.
-
-**Real-world benefits I've experienced**:
-- Claude stops rediscovering the same architectural patterns over and over
-- Debugging is faster because Claude remembers past investigations
-- Complex codebases become manageable as knowledge accumulates
-- Token usage drops significantly on repeated tasks
-
-The memories are stored in a single human-readable Markdown file (`knowledge.md`) that you can read and edit yourself. Simple keyword search finds what you need - no database required.
-
----
+**Benefits**: No more rediscovering the same patterns. Faster debugging. Lower token usage.
 
 ## Features
 
-- **Persistent Knowledge**: Memories survive across Claude Code sessions
-- **Simple Search**: Keyword matching with recency-based sorting
-- **Human-Readable**: All memories stored in a single `knowledge.md` file
-- **No Database**: Pure file-based storage - just one Markdown file
-- **Zero Setup**: Uses uv with inline dependencies - no manual venv or pip needed
-- **Cross-Platform**: Works on macOS, Linux, and Windows
+- **Two-tier storage**: Permanent knowledge + temporary session state
+- **Survives compaction**: Session memory persists through context limits
+- **Human-readable**: Plain Markdown files you can edit
+- **No database**: Pure file-based, keyword search
+- **Zero setup**: Auto-installs dependencies via uv
+- **Cross-platform**: macOS, Linux, Windows
 
 ## Usage
 
+### Long-term Knowledge
+
 ```bash
-# Add memories
-./.claude/tools/memory.sh add discovery "API uses JWT with RS256"
-./.claude/tools/memory.sh add gotcha "Redis needs explicit close()" --tags redis,pool
-
-# Search memories (keyword matching)
-./.claude/tools/memory.sh search "authentication redis"
-
-# Get context block for a topic
-./.claude/tools/memory.sh context "vespa-linux server docker"
-
-# List and manage
+./.claude/tools/memory.sh add gotcha "Redis needs explicit close()" --tags redis
+./.claude/tools/memory.sh context "authentication redis"
+./.claude/tools/memory.sh search "API"
 ./.claude/tools/memory.sh list --category gotcha
-./.claude/tools/memory.sh stats
 ./.claude/tools/memory.sh delete <id>
 ```
 
-## Memory Categories
+### Session Memory
 
-| Category | Use For |
-|----------|---------|
-| `architecture` | System design, component relationships |
-| `discovery` | Exploration findings |
-| `pattern` | Code conventions, idioms |
-| `gotcha` | Bugs, workarounds, pitfalls |
-| `config` | Environment, settings |
-| `entity` | Key classes, functions, APIs |
-| `decision` | Design rationale |
+```bash
+./.claude/tools/memory.sh session add plan "1. Add auth 2. Add tests"
+./.claude/tools/memory.sh session add todo "Implement JWT" --status pending
+./.claude/tools/memory.sh session show
+./.claude/tools/memory.sh session update <id> --status completed
+./.claude/tools/memory.sh session archive <id>   # Move to knowledge
+./.claude/tools/memory.sh session clear
+```
+
+## Categories
+
+**Knowledge**: `architecture`, `discovery`, `pattern`, `gotcha`, `config`, `entity`, `decision`
+
+**Session**: `plan`, `todo`, `progress`, `note`, `blocker`
 
 ## Requirements
 
-- **uv**: Installed automatically by wrapper scripts
-- **Python 3.11+**: Installed automatically by uv if needed
-
-## Troubleshooting
-
-**uv not found**: Auto-installs on first run. Manual: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-
-**Permission denied**: Run `chmod +x .claude/tools/memory.sh`
+- **uv**: Auto-installed by wrapper scripts
+- **Python 3.11+**: Auto-installed by uv if needed
 
 ## License
 

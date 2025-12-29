@@ -23,15 +23,18 @@ def temp_project():
     # Override paths
     original_project_root = memory.PROJECT_ROOT
     original_knowledge_file = memory.KNOWLEDGE_FILE
+    original_session_file = memory.SESSION_FILE
 
     memory.PROJECT_ROOT = Path(temp_dir)
     memory.KNOWLEDGE_FILE = Path(temp_dir) / "knowledge.md"
+    memory.SESSION_FILE = Path(temp_dir) / "session.md"
 
     yield temp_dir
 
     # Restore original paths
     memory.PROJECT_ROOT = original_project_root
     memory.KNOWLEDGE_FILE = original_knowledge_file
+    memory.SESSION_FILE = original_session_file
 
     # Cleanup
     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -299,6 +302,185 @@ class TestCalculateAgeDays:
 
     def test_invalid_date(self):
         assert memory.calculate_age_days("not-a-date") == 9999
+
+
+class TestSessionEntryDataclass:
+    """Tests for SessionEntry dataclass."""
+
+    def test_to_dict_with_status(self):
+        entry = memory.SessionEntry(
+            id="s-pla-20241230-abc1",
+            category="plan",
+            content="Test plan",
+            status="pending",
+            changed_at="2024-12-30T10:00:00"
+        )
+        result = entry.to_dict()
+
+        assert result["id"] == "s-pla-20241230-abc1"
+        assert result["category"] == "plan"
+        assert result["content"] == "Test plan"
+        assert result["status"] == "pending"
+        assert result["changed_at"] == "2024-12-30T10:00:00"
+
+    def test_to_dict_without_status(self):
+        entry = memory.SessionEntry(
+            id="s-not-20241230-abc1",
+            category="note",
+            content="General note"
+        )
+        result = entry.to_dict()
+
+        assert "status" not in result
+
+
+class TestGenerateSessionId:
+    """Tests for generate_session_id function."""
+
+    def test_id_format(self):
+        entry_id = memory.generate_session_id("plan", "test content")
+        parts = entry_id.split("-")
+
+        assert len(parts) == 4
+        assert parts[0] == "s"  # Session prefix
+        assert parts[1] == "pla"  # First 3 chars of category
+        assert len(parts[2]) == 14  # Timestamp
+        assert len(parts[3]) == 4  # 4-char hash
+
+
+class TestSessionFileOperations:
+    """Tests for session file operations."""
+
+    def test_add_session_entry(self, temp_project):
+        result = memory.cmd_session_add("plan", "Implementation plan", status="")
+
+        assert result["status"] == "success"
+        assert "entry" in result
+        assert result["entry"]["category"] == "plan"
+        assert result["entry"]["content"] == "Implementation plan"
+
+    def test_add_session_todo_with_status(self, temp_project):
+        result = memory.cmd_session_add("todo", "Write tests", status="pending")
+
+        assert result["status"] == "success"
+        assert result["entry"]["status"] == "pending"
+
+    def test_add_session_invalid_status(self, temp_project):
+        result = memory.cmd_session_add("todo", "Task", status="invalid_status")
+
+        assert result["status"] == "error"
+        assert "Invalid status" in result["message"]
+
+    def test_list_session_entries(self, temp_project):
+        memory.cmd_session_add("plan", "Plan 1")
+        memory.cmd_session_add("todo", "Todo 1", status="pending")
+
+        result = memory.cmd_session_list()
+        assert result["count"] >= 2
+
+    def test_list_session_by_category(self, temp_project):
+        memory.cmd_session_add("plan", "Plan 1")
+        memory.cmd_session_add("todo", "Todo 1", status="pending")
+
+        result = memory.cmd_session_list(category="todo")
+        assert all(r["category"] == "todo" for r in result["results"])
+
+    def test_list_session_by_status(self, temp_project):
+        memory.cmd_session_add("todo", "Todo 1", status="pending")
+        memory.cmd_session_add("todo", "Todo 2", status="completed")
+
+        result = memory.cmd_session_list(status="pending")
+        assert all(r.get("status") == "pending" for r in result["results"])
+
+    def test_update_session_status(self, temp_project):
+        add_result = memory.cmd_session_add("todo", "Task", status="pending")
+        entry_id = add_result["entry"]["id"]
+
+        update_result = memory.cmd_session_update(entry_id, status="completed")
+        assert update_result["status"] == "success"
+        assert update_result["entry"]["status"] == "completed"
+
+    def test_update_session_content(self, temp_project):
+        add_result = memory.cmd_session_add("note", "Original content")
+        entry_id = add_result["entry"]["id"]
+
+        update_result = memory.cmd_session_update(entry_id, content="Updated content")
+        assert update_result["status"] == "success"
+        assert update_result["entry"]["content"] == "Updated content"
+
+    def test_update_nonexistent_entry(self, temp_project):
+        result = memory.cmd_session_update("nonexistent-id", status="completed")
+        assert result["status"] == "error"
+
+    def test_delete_session_entry(self, temp_project):
+        add_result = memory.cmd_session_add("note", "To delete")
+        entry_id = add_result["entry"]["id"]
+
+        delete_result = memory.cmd_session_delete(entry_id)
+        assert delete_result["status"] == "success"
+
+        # Verify deleted
+        list_result = memory.cmd_session_list()
+        assert not any(r["id"] == entry_id for r in list_result["results"])
+
+    def test_clear_session(self, temp_project):
+        memory.cmd_session_add("plan", "Plan 1")
+        memory.cmd_session_add("todo", "Todo 1")
+
+        clear_result = memory.cmd_session_clear()
+        assert clear_result["status"] == "success"
+        assert clear_result["cleared_count"] >= 2
+
+        # Verify all cleared
+        list_result = memory.cmd_session_list()
+        assert list_result["count"] == 0
+
+    def test_session_show(self, temp_project):
+        memory.cmd_session_add("plan", "Main implementation plan")
+        memory.cmd_session_add("todo", "Task 1", status="in_progress")
+
+        result = memory.cmd_session_show()
+        assert result["count"] >= 2
+        assert "Current Session State" in result["context"]
+
+    def test_session_archive(self, temp_project):
+        add_result = memory.cmd_session_add("note", "Important discovery worth keeping")
+        entry_id = add_result["entry"]["id"]
+
+        archive_result = memory.cmd_session_archive(entry_id)
+        assert archive_result["status"] == "success"
+        assert "archived_to" in archive_result
+
+        # Verify removed from session
+        list_result = memory.cmd_session_list()
+        assert not any(r["id"] == entry_id for r in list_result["results"])
+
+        # Verify added to knowledge
+        knowledge_result = memory.cmd_list()
+        assert knowledge_result["count"] >= 1
+
+    def test_session_archive_with_category(self, temp_project):
+        add_result = memory.cmd_session_add("note", "This is actually a gotcha")
+        entry_id = add_result["entry"]["id"]
+
+        archive_result = memory.cmd_session_archive(entry_id, category="gotcha")
+        assert archive_result["status"] == "success"
+        assert archive_result["category"] == "gotcha"
+
+
+class TestSessionParsing:
+    """Tests for session file parsing."""
+
+    def test_parse_empty_session(self, temp_project):
+        entries = memory.parse_session_file()
+        assert entries == []
+
+    def test_parse_session_with_status(self, temp_project):
+        memory.cmd_session_add("todo", "Test task", status="in_progress")
+
+        entries = memory.parse_session_file()
+        assert len(entries) >= 1
+        assert any(e.status == "in_progress" for e in entries)
 
 
 if __name__ == "__main__":

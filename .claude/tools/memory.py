@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 
 # =============================================================================
@@ -40,8 +40,9 @@ __version__ = "3.0.0"
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 KNOWLEDGE_FILE = PROJECT_ROOT / "knowledge.md"
+SESSION_FILE = PROJECT_ROOT / "session.md"
 
-# Categories for organizing knowledge
+# Categories for organizing long-term knowledge
 CATEGORIES = [
     "architecture",   # System design, structure
     "discovery",      # Things learned during exploration
@@ -54,6 +55,20 @@ CATEGORIES = [
     "reference",      # External links, docs
     "context",        # Project-specific context
 ]
+
+# Categories for session-specific temporary storage
+SESSION_CATEGORIES = [
+    "plan",           # Implementation plans, task breakdowns
+    "todo",           # Task items with status
+    "progress",       # Log entries of what was done
+    "note",           # General session information
+    "context",        # Session-specific findings (not permanent)
+    "decision",       # Tentative decisions (may become permanent)
+    "blocker",        # Issues blocking progress
+]
+
+# Valid statuses for session todos
+SESSION_STATUSES = ["pending", "in_progress", "completed", "blocked"]
 
 # Regex for valid category names (alphanumeric, underscore, hyphen only)
 VALID_CATEGORY_PATTERN = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
@@ -92,6 +107,27 @@ class Memory:
             "tags": self.tags,
             "changed_at": self.changed_at,
         }
+
+
+@dataclass
+class SessionEntry:
+    """A single session memory entry with optional status."""
+    id: str
+    category: str
+    content: str
+    status: str = ""  # For todos: pending, in_progress, completed, blocked
+    changed_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        result = {
+            "id": self.id,
+            "category": self.category,
+            "content": self.content,
+            "changed_at": self.changed_at,
+        }
+        if self.status:
+            result["status"] = self.status
+        return result
 
 
 # =============================================================================
@@ -199,6 +235,134 @@ def delete_memory_from_file(memory_id: str) -> bool:
         write_knowledge_file(memories)
         return True
     return False
+
+
+# =============================================================================
+# SESSION FILE OPERATIONS
+# =============================================================================
+
+def parse_session_file() -> list[SessionEntry]:
+    """Parse the session file into session entries."""
+    entries = []
+    if not SESSION_FILE.exists():
+        return entries
+
+    content = SESSION_FILE.read_text(encoding="utf-8")
+
+    # Split by entry markers (## followed by ID)
+    pattern = r'^## \[([^\]]+)\](.*?)(?=^## \[|\Z)'
+    matches = re.findall(pattern, content, re.MULTILINE | re.DOTALL)
+
+    for entry_id, body in matches:
+        body = body.strip()
+        if not body:
+            continue
+
+        # Extract category
+        category = "note"
+        cat_match = re.search(r'^Category:\s*(.+)$', body, re.MULTILINE)
+        if cat_match:
+            category = sanitize_category(cat_match.group(1).strip())
+            body = re.sub(r'^Category:\s*.+\n?', '', body, flags=re.MULTILINE)
+
+        # Extract status if present
+        status = ""
+        status_match = re.search(r'^Status:\s*(.+)$', body, re.MULTILINE)
+        if status_match:
+            status = status_match.group(1).strip().lower()
+            if status not in SESSION_STATUSES:
+                status = ""
+            body = re.sub(r'^Status:\s*.+\n?', '', body, flags=re.MULTILINE)
+
+        # Extract timestamp
+        changed_at = ""
+        changed_match = re.search(r'^Changed:\s*(.+)$', body, re.MULTILINE)
+        if changed_match:
+            changed_at = changed_match.group(1).strip()
+            body = re.sub(r'^Changed:\s*.+\n?', '', body, flags=re.MULTILINE)
+
+        content_text = body.strip()
+
+        if content_text:
+            entries.append(SessionEntry(
+                id=entry_id,
+                category=category,
+                content=content_text,
+                status=status,
+                changed_at=changed_at,
+            ))
+
+    return entries
+
+
+def write_session_file(entries: list[SessionEntry]) -> None:
+    """Write all session entries to the session file."""
+    lines = ["# Session Memory\n"]
+    lines.append(f"Last updated: {datetime.now().isoformat()}\n\n")
+
+    for entry in entries:
+        lines.append(f"## [{entry.id}]\n")
+        lines.append(f"Category: {entry.category}\n")
+        if entry.status:
+            lines.append(f"Status: {entry.status}\n")
+        if entry.changed_at:
+            lines.append(f"Changed: {entry.changed_at}\n")
+        lines.append(f"\n{entry.content}\n\n")
+
+    SESSION_FILE.write_text("".join(lines), encoding="utf-8")
+
+
+def add_session_entry(entry: SessionEntry) -> None:
+    """Add or update an entry in the session file."""
+    existing_entries = parse_session_file()
+
+    found = False
+    for i, e in enumerate(existing_entries):
+        if e.id == entry.id:
+            existing_entries[i] = entry
+            found = True
+            break
+
+    if not found:
+        existing_entries.append(entry)
+
+    write_session_file(existing_entries)
+
+
+def delete_session_entry(entry_id: str) -> bool:
+    """Delete an entry from the session file."""
+    if not SESSION_FILE.exists():
+        return False
+
+    entries = parse_session_file()
+    original_count = len(entries)
+    entries = [e for e in entries if e.id != entry_id]
+
+    if len(entries) < original_count:
+        write_session_file(entries)
+        return True
+    return False
+
+
+def clear_session_file() -> int:
+    """Clear all entries from session file. Returns count of cleared entries."""
+    if not SESSION_FILE.exists():
+        return 0
+
+    entries = parse_session_file()
+    count = len(entries)
+
+    if count > 0:
+        SESSION_FILE.unlink()
+
+    return count
+
+
+def generate_session_id(category: str, content: str) -> str:
+    """Generate a unique ID for a session entry."""
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    content_hash = hashlib.md5(content.encode()).hexdigest()[:4]
+    return f"s-{category[:3]}-{timestamp}-{content_hash}"
 
 
 # =============================================================================
@@ -478,6 +642,254 @@ def cmd_maintain() -> dict[str, Any]:
 
 
 # =============================================================================
+# SESSION COMMANDS
+# =============================================================================
+
+def cmd_session_add(
+    category: str,
+    content: str,
+    status: str = "",
+) -> dict[str, Any]:
+    """Add a new session entry."""
+    safe_category = sanitize_category(category)
+
+    # Validate status if provided
+    if status and status.lower() not in SESSION_STATUSES:
+        return {
+            "status": "error",
+            "message": f"Invalid status: {status}. Valid: {', '.join(SESSION_STATUSES)}",
+        }
+
+    entry_id = generate_session_id(safe_category, content)
+    now = datetime.now().isoformat()
+
+    entry = SessionEntry(
+        id=entry_id,
+        category=safe_category,
+        content=content,
+        status=status.lower() if status else "",
+        changed_at=now,
+    )
+
+    add_session_entry(entry)
+
+    return {
+        "status": "success",
+        "message": f"Session entry added: {entry_id}",
+        "entry": entry.to_dict(),
+    }
+
+
+def cmd_session_list(
+    category: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List session entries, optionally filtered."""
+    entries = parse_session_file()
+
+    # Filter by category
+    if category:
+        safe_category = sanitize_category(category)
+        entries = [e for e in entries if e.category == safe_category]
+
+    # Filter by status
+    if status:
+        status_lower = status.lower()
+        entries = [e for e in entries if e.status == status_lower]
+
+    # Sort by changed_at descending
+    entries.sort(key=lambda e: e.changed_at or "", reverse=True)
+
+    # Apply limit
+    entries = entries[:limit]
+
+    results = []
+    for entry in entries:
+        result = {
+            "id": entry.id,
+            "category": entry.category,
+            "content": entry.content[:100] + "..." if len(entry.content) > 100 else entry.content,
+            "changed_at": entry.changed_at,
+        }
+        if entry.status:
+            result["status"] = entry.status
+        results.append(result)
+
+    return {
+        "count": len(results),
+        "category": category,
+        "status": status,
+        "results": results,
+    }
+
+
+def cmd_session_update(
+    entry_id: str,
+    status: str | None = None,
+    content: str | None = None,
+) -> dict[str, Any]:
+    """Update a session entry's status or content."""
+    entries = parse_session_file()
+
+    for entry in entries:
+        if entry.id == entry_id:
+            if status:
+                if status.lower() not in SESSION_STATUSES:
+                    return {
+                        "status": "error",
+                        "message": f"Invalid status: {status}. Valid: {', '.join(SESSION_STATUSES)}",
+                    }
+                entry.status = status.lower()
+
+            if content:
+                entry.content = content
+
+            entry.changed_at = datetime.now().isoformat()
+            write_session_file(entries)
+
+            return {
+                "status": "success",
+                "message": f"Session entry updated: {entry_id}",
+                "entry": entry.to_dict(),
+            }
+
+    return {
+        "status": "error",
+        "message": f"Session entry not found: {entry_id}",
+    }
+
+
+def cmd_session_delete(entry_id: str) -> dict[str, Any]:
+    """Delete a session entry by ID."""
+    if delete_session_entry(entry_id):
+        return {
+            "status": "success",
+            "message": f"Session entry deleted: {entry_id}",
+        }
+
+    return {
+        "status": "error",
+        "message": f"Failed to delete session entry: {entry_id}",
+    }
+
+
+def cmd_session_clear() -> dict[str, Any]:
+    """Clear all session entries."""
+    count = clear_session_file()
+
+    return {
+        "status": "success",
+        "message": f"Cleared {count} session entries",
+        "cleared_count": count,
+    }
+
+
+def cmd_session_show() -> dict[str, Any]:
+    """Show full session context - all entries formatted for review."""
+    entries = parse_session_file()
+
+    if not entries:
+        return {
+            "count": 0,
+            "context": "",
+        }
+
+    # Group by category
+    by_category: dict[str, list[SessionEntry]] = {}
+    for entry in entries:
+        if entry.category not in by_category:
+            by_category[entry.category] = []
+        by_category[entry.category].append(entry)
+
+    lines = ["# Current Session State\n"]
+
+    # Order: plan first, then todo (by status), then progress, then others
+    category_order = ["plan", "todo", "progress", "note", "context", "decision", "blocker"]
+    for cat in category_order:
+        if cat not in by_category:
+            continue
+        cat_entries = by_category[cat]
+        lines.append(f"\n## {cat.title()}\n")
+
+        # For todos, group by status
+        if cat == "todo":
+            status_order = ["in_progress", "pending", "blocked", "completed"]
+            for status in status_order:
+                status_entries = [e for e in cat_entries if e.status == status]
+                if status_entries:
+                    lines.append(f"\n### {status.replace('_', ' ').title()}\n")
+                    for entry in status_entries:
+                        lines.append(f"- [{entry.id}] {entry.content}")
+        else:
+            for entry in cat_entries:
+                lines.append(f"### [{entry.id}]")
+                lines.append(entry.content)
+                lines.append("")
+
+    return {
+        "count": len(entries),
+        "context": "\n".join(lines),
+    }
+
+
+def cmd_session_archive(entry_id: str, category: str | None = None) -> dict[str, Any]:
+    """Archive a session entry to permanent knowledge.
+
+    Copies the session entry to knowledge.md and deletes from session.md.
+    """
+    entries = parse_session_file()
+
+    for entry in entries:
+        if entry.id == entry_id:
+            # Determine target category
+            target_category = sanitize_category(category) if category else entry.category
+            # Map session categories to knowledge categories
+            category_mapping = {
+                "plan": "architecture",
+                "todo": "todo",
+                "progress": "discovery",
+                "note": "discovery",
+                "context": "context",
+                "decision": "decision",
+                "blocker": "gotcha",
+            }
+            if target_category in category_mapping:
+                target_category = category_mapping[target_category]
+
+            # Create knowledge memory from session entry
+            memory_id = generate_memory_id(target_category, entry.content)
+            now = datetime.now().isoformat()
+
+            memory = Memory(
+                id=memory_id,
+                category=target_category,
+                content=entry.content,
+                tags=[],
+                changed_at=now,
+            )
+
+            # Add to knowledge
+            add_memory_to_file(memory)
+
+            # Remove from session
+            delete_session_entry(entry_id)
+
+            return {
+                "status": "success",
+                "message": f"Archived to knowledge: {memory_id}",
+                "archived_from": entry_id,
+                "archived_to": memory_id,
+                "category": target_category,
+            }
+
+    return {
+        "status": "error",
+        "message": f"Session entry not found: {entry_id}",
+    }
+
+
+# =============================================================================
 # OUTPUT FORMATTING
 # =============================================================================
 
@@ -513,6 +925,18 @@ def format_output(data: dict[str, Any], output_format: str = "text") -> str:
     if "memory" in data:
         mem = data["memory"]
         return f"Added [{mem['category']}] {mem['id']}\n{mem['content']}"
+
+    # Handle session entry output
+    if "entry" in data:
+        entry = data["entry"]
+        status_str = f" ({entry['status']})" if entry.get("status") else ""
+        return f"[{entry['category']}] {entry['id']}{status_str}\n{entry['content']}"
+
+    # Handle session show (context without topic)
+    if "context" in data and "topic" not in data:
+        if data.get("context"):
+            return data["context"]
+        return "No session entries"
 
     if "message" in data:
         return data["message"]
@@ -558,7 +982,7 @@ def main() -> None:
         description="Model Memory Tool - Persistent Knowledge Base",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
-Commands:
+Commands (Long-term Knowledge):
   add <category> <content>    Add a new memory
   search <query>              Search memories (keyword matching)
   context <topic>             Get context block for a topic
@@ -567,25 +991,44 @@ Commands:
   stats                       Show statistics
   maintain                    Show age distribution
 
-Categories: {', '.join(CATEGORIES)}
+Session Commands (Temporary):
+  session add <cat> <content> Add session entry (plan/todo/progress/note/blocker)
+  session list                List session entries
+  session show                Show full session state
+  session update <id>         Update entry status/content
+  session delete <id>         Delete session entry
+  session clear               Clear all session entries
+  session archive <id>        Move entry to permanent knowledge
+
+Knowledge Categories: {', '.join(CATEGORIES)}
+Session Categories: {', '.join(SESSION_CATEGORIES)}
+Session Statuses: {', '.join(SESSION_STATUSES)}
 
 Examples:
   memory.sh add discovery "The API uses OAuth2 with PKCE flow"
-  memory.sh add gotcha "Redis connection pool must be closed explicitly" --tags redis,connection
+  memory.sh add gotcha "Redis pool must be closed" --tags redis
   memory.sh search "authentication"
-  memory.sh search "vespa server docker"
-  memory.sh context "vespa-linux server services"
-  memory.sh list --category gotcha
-  memory.sh maintain
+  memory.sh context "vespa-linux server"
+  memory.sh session add plan "1. Add auth 2. Add tests 3. Deploy"
+  memory.sh session add todo "Implement JWT middleware" --status pending
+  memory.sh session add progress "Completed auth module"
+  memory.sh session add note "User prefers ES modules over CommonJS"
+  memory.sh session list --status pending
+  memory.sh session update <id> --status completed
+  memory.sh session show
+  memory.sh session archive <id> --category gotcha
+  memory.sh session clear
         """
     )
 
-    parser.add_argument("command", nargs="?", choices=["add", "search", "context", "list", "delete", "stats", "maintain"],
+    parser.add_argument("command", nargs="?", choices=["add", "search", "context", "list", "delete", "stats", "maintain", "session"],
                         help="Command to execute")
     parser.add_argument("args", nargs="*", help="Command arguments")
     parser.add_argument("--tags", "-t", help="Comma-separated tags (for add)")
     parser.add_argument("--limit", "-l", type=int, default=10, help="Limit results")
     parser.add_argument("--category", "-c", help="Filter by category")
+    parser.add_argument("--status", "-s", help="Filter by status or set status (for session)")
+    parser.add_argument("--content", help="New content (for session update)")
     parser.add_argument("--output", "-o", choices=["text", "json"], default="text",
                         help="Output format")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress non-essential output")
@@ -636,6 +1079,61 @@ Examples:
 
         elif args.command == "maintain":
             result = cmd_maintain()
+
+        elif args.command == "session":
+            if not args.args:
+                print("Error: session requires a subcommand (add/list/show/update/delete/clear/archive)", file=sys.stderr)
+                sys.exit(1)
+
+            subcmd = args.args[0]
+
+            if subcmd == "add":
+                if len(args.args) < 3:
+                    print("Error: session add requires <category> <content>", file=sys.stderr)
+                    sys.exit(1)
+                category = args.args[1]
+                content = " ".join(args.args[2:])
+                result = cmd_session_add(category, content, status=args.status or "")
+
+            elif subcmd == "list":
+                result = cmd_session_list(
+                    category=args.category,
+                    status=args.status,
+                    limit=args.limit,
+                )
+
+            elif subcmd == "show":
+                result = cmd_session_show()
+
+            elif subcmd == "update":
+                if len(args.args) < 2:
+                    print("Error: session update requires <id>", file=sys.stderr)
+                    sys.exit(1)
+                entry_id = args.args[1]
+                result = cmd_session_update(
+                    entry_id,
+                    status=args.status,
+                    content=args.content,
+                )
+
+            elif subcmd == "delete":
+                if len(args.args) < 2:
+                    print("Error: session delete requires <id>", file=sys.stderr)
+                    sys.exit(1)
+                result = cmd_session_delete(args.args[1])
+
+            elif subcmd == "clear":
+                result = cmd_session_clear()
+
+            elif subcmd == "archive":
+                if len(args.args) < 2:
+                    print("Error: session archive requires <id>", file=sys.stderr)
+                    sys.exit(1)
+                result = cmd_session_archive(args.args[1], category=args.category)
+
+            else:
+                print(f"Error: unknown session subcommand: {subcmd}", file=sys.stderr)
+                sys.exit(1)
 
         # Check for error status and exit appropriately
         is_error = result.get("status") == "error"

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2025-12-30
+
+### Added
+- **Session Memory**: New temporary storage system for work-in-progress state
+- `session.md` file for storing plans, todos, progress, and session-specific context
+- `SessionEntry` dataclass with optional status field
+- Session commands: `session add`, `session list`, `session show`, `session update`, `session delete`, `session clear`, `session archive`
+- Session categories: plan, todo, progress, note, context, decision, blocker
+- Session statuses for todos: pending, in_progress, completed, blocked
+- `--status` and `--content` CLI arguments for session operations
+- Archive functionality to promote session entries to permanent knowledge
+
+### Changed
+- Updated CLAUDE.md with comprehensive session memory documentation
+- Added session.md to .gitignore (temporary/user-specific)
+
 ## [3.0.0] - 2025-12-30
 
 ### Changed
