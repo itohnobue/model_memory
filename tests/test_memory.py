@@ -23,18 +23,15 @@ def temp_project():
     # Override paths
     original_project_root = memory.PROJECT_ROOT
     original_knowledge_file = memory.KNOWLEDGE_FILE
-    original_db_path = memory.DB_PATH
 
     memory.PROJECT_ROOT = Path(temp_dir)
     memory.KNOWLEDGE_FILE = Path(temp_dir) / "knowledge.md"
-    memory.DB_PATH = Path(temp_dir) / "memory.db"
 
     yield temp_dir
 
     # Restore original paths
     memory.PROJECT_ROOT = original_project_root
     memory.KNOWLEDGE_FILE = original_knowledge_file
-    memory.DB_PATH = original_db_path
 
     # Cleanup
     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -61,52 +58,55 @@ class TestSanitizeCategory:
         assert memory.sanitize_category("///") == "misc"
 
 
-class TestEscapeFts5Query:
-    """Tests for escape_fts5_query function."""
+class TestTokenize:
+    """Tests for tokenize function."""
 
-    def test_simple_query(self):
-        assert memory.escape_fts5_query("hello") == '"hello"'
+    def test_simple_words(self):
+        assert memory.tokenize("hello world") == ["hello", "world"]
 
-    def test_query_with_quotes(self):
-        assert memory.escape_fts5_query('say "hello"') == '"say ""hello"""'
+    def test_hyphenated_words(self):
+        assert memory.tokenize("vespa-linux server") == ["vespa-linux", "server"]
 
-    def test_query_with_special_chars(self):
-        assert memory.escape_fts5_query("test*query") == '"test*query"'
-        assert memory.escape_fts5_query("foo:bar") == '"foo:bar"'
+    def test_mixed_case(self):
+        assert memory.tokenize("Hello WORLD") == ["hello", "world"]
+
+    def test_special_characters(self):
+        assert memory.tokenize("test@example.com") == ["test", "example", "com"]
+
+    def test_numbers(self):
+        assert memory.tokenize("port 8080") == ["port", "8080"]
+
+    def test_empty_string(self):
+        assert memory.tokenize("") == []
 
 
-class TestBuildOrQuery:
-    """Tests for build_or_query function."""
+class TestCalculateMatchScore:
+    """Tests for calculate_match_score function."""
 
-    def test_single_keyword(self):
-        result = memory.build_or_query("hello")
-        assert '"hello"' in result
-        assert '"hello"*' in result
-        assert "OR" in result
+    def test_single_keyword_match(self):
+        mem = memory.Memory(id="test", category="discovery", content="Redis server")
+        assert memory.calculate_match_score(mem, ["redis"]) == 1
 
-    def test_multiple_keywords(self):
-        result = memory.build_or_query("vespa linux docker")
-        assert '"vespa"' in result
-        assert '"linux"' in result
-        assert '"docker"' in result
-        assert result.count("OR") >= 5  # Each keyword has exact + prefix
+    def test_multiple_keyword_matches(self):
+        mem = memory.Memory(id="test", category="discovery", content="Redis server on vespa-linux")
+        assert memory.calculate_match_score(mem, ["redis", "vespa"]) == 2
 
-    def test_quoted_phrase_passthrough(self):
-        result = memory.build_or_query('"exact phrase"')
-        assert result == '"exact phrase"'
+    def test_no_match(self):
+        mem = memory.Memory(id="test", category="discovery", content="Redis server")
+        assert memory.calculate_match_score(mem, ["postgres"]) == 0
 
-    def test_empty_query(self):
-        result = memory.build_or_query("")
-        assert result == '""'
+    def test_tag_match(self):
+        mem = memory.Memory(id="test", category="discovery", content="Server", tags=["redis", "production"])
+        assert memory.calculate_match_score(mem, ["redis"]) == 1
 
-    def test_whitespace_handling(self):
-        result = memory.build_or_query("  foo   bar  ")
-        assert '"foo"' in result
-        assert '"bar"' in result
+    def test_category_match(self):
+        mem = memory.Memory(id="test", category="gotcha", content="Some issue")
+        assert memory.calculate_match_score(mem, ["gotcha"]) == 1
 
-    def test_special_chars_escaped(self):
-        result = memory.build_or_query('say "hello"')
-        assert '""hello""' in result  # Quotes escaped
+    def test_multiple_occurrences(self):
+        mem = memory.Memory(id="test", category="discovery", content="Redis redis REDIS")
+        score = memory.calculate_match_score(mem, ["redis"])
+        assert score >= 3  # Base 1 + 2 extra occurrences
 
 
 class TestMemoryDataclass:
@@ -153,12 +153,8 @@ class TestGenerateMemoryId:
         assert id1.split("-")[2] != id2.split("-")[2]
 
 
-class TestDatabaseOperations:
-    """Tests for database operations."""
-
-    def test_init_database(self, temp_project):
-        memory.init_database()
-        assert memory.DB_PATH.exists()
+class TestFileOperations:
+    """Tests for file operations."""
 
     def test_add_memory(self, temp_project):
         result = memory.cmd_add("discovery", "Test discovery", ["tag1"])
@@ -177,6 +173,12 @@ class TestDatabaseOperations:
 
         assert result["count"] >= 1
         assert any("JWT" in r["content"] for r in result["results"])
+
+    def test_search_partial_match(self, temp_project):
+        memory.cmd_add("discovery", "vespa-linux server configuration")
+
+        result = memory.cmd_search("vespa")
+        assert result["count"] >= 1
 
     def test_list_memories(self, temp_project):
         memory.cmd_add("discovery", "Discovery 1")
@@ -222,9 +224,26 @@ class TestMaintain:
         result = memory.cmd_maintain()
 
         assert "age_distribution" in result
-        assert "db_integrity" in result
-        assert result["db_integrity"] == "ok"
-        assert result["index_synced"] == True
+        assert result["total_memories"] >= 1
+
+
+class TestContext:
+    """Tests for context command."""
+
+    def test_context_returns_formatted(self, temp_project):
+        memory.cmd_add("discovery", "Redis runs on port 6379", ["redis"])
+
+        result = memory.cmd_context("redis")
+
+        assert result["count"] >= 1
+        assert "Redis" in result["context"]
+        assert "Relevant Knowledge" in result["context"]
+
+    def test_context_no_results(self, temp_project):
+        result = memory.cmd_context("nonexistent topic")
+
+        assert result["count"] == 0
+        assert result["context"] == ""
 
 
 class TestFormatOutput:
@@ -265,6 +284,21 @@ class TestSanitizeErrorMessage:
         result = memory.sanitize_error_message(error)
 
         assert "C:\\Users\\secret\\" not in result
+
+
+class TestCalculateAgeDays:
+    """Tests for calculate_age_days function."""
+
+    def test_recent_date(self):
+        from datetime import datetime
+        recent = datetime.now().isoformat()
+        assert memory.calculate_age_days(recent) <= 1
+
+    def test_empty_date(self):
+        assert memory.calculate_age_days("") == 9999
+
+    def test_invalid_date(self):
+        assert memory.calculate_age_days("not-a-date") == 9999
 
 
 if __name__ == "__main__":

@@ -26,16 +26,16 @@ This tool solves that problem by giving Claude a persistent memory that survives
 - Complex codebases become manageable as knowledge accumulates
 - Token usage drops significantly on repeated tasks
 
-The memories are stored in a single human-readable Markdown file (`knowledge.md`) that you can read and edit yourself, with SQLite FTS5 for fast search. Everything auto-syncs - no manual database management needed.
+The memories are stored in a single human-readable Markdown file (`knowledge.md`) that you can read and edit yourself. Simple keyword search finds what you need - no database required.
 
 ---
 
 ## Features
 
 - **Persistent Knowledge**: Memories survive across Claude Code sessions
-- **Smart Search**: BM25 relevance ranking with recency boost
+- **Simple Search**: Keyword matching with recency-based sorting
 - **Human-Readable**: All memories stored in a single `knowledge.md` file
-- **Auto-Sync**: Database rebuilds from Markdown on every query
+- **No Database**: Pure file-based storage - just one Markdown file
 - **Zero Setup**: Uses uv with inline dependencies - no manual venv or pip needed
 - **Cross-Platform**: Works on macOS, Linux, and Windows
 
@@ -46,11 +46,10 @@ The memories are stored in a single human-readable Markdown file (`knowledge.md`
 ./.claude/tools/memory.sh add discovery "API uses JWT with RS256"
 ./.claude/tools/memory.sh add gotcha "Redis needs explicit close()" --tags redis,pool
 
-# Search memories (keyword OR search by default)
-./.claude/tools/memory.sh search "authentication redis"      # Finds ANY keyword
-./.claude/tools/memory.sh search "JWT RS256" --mode phrase   # Exact phrase match
+# Search memories (keyword matching)
+./.claude/tools/memory.sh search "authentication redis"
 
-# Get context block for a topic (uses keyword OR search)
+# Get context block for a topic
 ./.claude/tools/memory.sh context "vespa-linux server docker"
 
 # List and manage
@@ -58,15 +57,6 @@ The memories are stored in a single human-readable Markdown file (`knowledge.md`
 ./.claude/tools/memory.sh stats
 ./.claude/tools/memory.sh delete <id>
 ```
-
-## Search Modes
-
-| Mode | Description | Example |
-|------|-------------|---------|
-| `keywords` (default) | OR search - matches ANY keyword | `search "redis auth"` finds memories with "redis" OR "auth" |
-| `phrase` | Exact phrase matching | `search "JWT token" --mode phrase` finds exact phrase |
-
-The `context` command always uses keyword mode for maximum recall.
 
 ## Memory Categories
 
@@ -88,8 +78,6 @@ The `context` command always uses keyword mode for maximum recall.
 ## Troubleshooting
 
 **uv not found**: Auto-installs on first run. Manual: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-
-**No search results**: Run `./.claude/tools/memory.sh rebuild` to reindex.
 
 **Permission denied**: Run `chmod +x .claude/tools/memory.sh`
 

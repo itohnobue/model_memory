@@ -7,17 +7,14 @@
 """
 Model Memory Tool - Persistent Knowledge Base for Claude Code
 
-A hybrid memory system combining:
-- Human-readable Markdown files for knowledge storage
-- SQLite FTS5 for fast full-text search
-- Auto-sync on every query
+A simple file-based memory system using only knowledge.md for storage.
+No database required - just plain text with keyword search.
 
 Usage:
     memory.py add <category> <content> [--tags tag1,tag2]
     memory.py search <query> [--limit N]
     memory.py context <topic>           # Get context block for a topic
     memory.py list [--category CAT]     # List all memories
-    memory.py rebuild                   # Force rebuild index from markdown
     memory.py delete <id>               # Delete a memory by ID
 """
 
@@ -27,14 +24,13 @@ import argparse
 import hashlib
 import json
 import re
-import sqlite3
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"
 
 
 # =============================================================================
@@ -44,7 +40,6 @@ __version__ = "2.0.0"
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 KNOWLEDGE_FILE = PROJECT_ROOT / "knowledge.md"
-DB_PATH = PROJECT_ROOT / "memory.db"
 
 # Categories for organizing knowledge
 CATEGORIES = [
@@ -207,164 +202,8 @@ def delete_memory_from_file(memory_id: str) -> bool:
 
 
 # =============================================================================
-# DATABASE OPERATIONS
+# SEARCH FUNCTIONS
 # =============================================================================
-
-def get_db_connection() -> sqlite3.Connection:
-    """Get database connection with FTS5 support."""
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    # Enable WAL mode for better concurrent access
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
-
-
-def init_database() -> None:
-    """Initialize the database with FTS5 table."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Main memories table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS memories (
-            id TEXT PRIMARY KEY,
-            category TEXT NOT NULL,
-            content TEXT NOT NULL,
-            tags TEXT,
-            changed_at TEXT,
-            content_hash TEXT
-        )
-    """)
-
-    # FTS5 virtual table for full-text search
-    cursor.execute("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-            id,
-            category,
-            content,
-            tags,
-            content='memories',
-            content_rowid='rowid'
-        )
-    """)
-
-    # Triggers to keep FTS in sync
-    cursor.execute("""
-        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-            INSERT INTO memories_fts(rowid, id, category, content, tags)
-            VALUES (new.rowid, new.id, new.category, new.content, new.tags);
-        END
-    """)
-
-    cursor.execute("""
-        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-            INSERT INTO memories_fts(memories_fts, rowid, id, category, content, tags)
-            VALUES('delete', old.rowid, old.id, old.category, old.content, old.tags);
-        END
-    """)
-
-    cursor.execute("""
-        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-            INSERT INTO memories_fts(memories_fts, rowid, id, category, content, tags)
-            VALUES('delete', old.rowid, old.id, old.category, old.content, old.tags);
-            INSERT INTO memories_fts(rowid, id, category, content, tags)
-            VALUES (new.rowid, new.id, new.category, new.content, new.tags);
-        END
-    """)
-
-    # File hashes table for sync tracking
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS file_hashes (
-            filepath TEXT PRIMARY KEY,
-            hash TEXT NOT NULL,
-            last_sync TEXT
-        )
-    """)
-
-    # Index for category filtering
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)
-    """)
-
-    # Index for date-based sorting (list, maintain commands)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_memories_changed_at ON memories(changed_at DESC)
-    """)
-
-    # Composite index for category + date (optimizes list --category with ORDER BY)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_memories_cat_date ON memories(category, changed_at DESC)
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-def compute_file_hash(filepath: Path) -> str:
-    """Compute hash of a file's content."""
-    if not filepath.exists():
-        return ""
-    content = filepath.read_bytes()
-    return hashlib.md5(content).hexdigest()
-
-
-def needs_sync(conn: sqlite3.Connection) -> bool:
-    """Check if knowledge file has changed since last sync."""
-    cursor = conn.cursor()
-
-    current_hash = compute_file_hash(KNOWLEDGE_FILE)
-    cursor.execute(
-        "SELECT hash FROM file_hashes WHERE filepath = ?",
-        (str(KNOWLEDGE_FILE),)
-    )
-    row = cursor.fetchone()
-
-    if row is None or row["hash"] != current_hash:
-        return True
-
-    return False
-
-
-def sync_from_file(conn: sqlite3.Connection, force: bool = False) -> None:
-    """Sync database from knowledge file."""
-    if not force and not needs_sync(conn):
-        return
-
-    cursor = conn.cursor()
-
-    # Clear existing data
-    cursor.execute("DELETE FROM memories")
-
-    # Rebuild FTS index
-    cursor.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
-
-    # Load all memories from file
-    all_memories = parse_knowledge_file()
-
-    # Insert into database
-    for memory in all_memories:
-        content_hash = hashlib.md5(memory.content.encode()).hexdigest()
-        cursor.execute("""
-            INSERT OR REPLACE INTO memories (id, category, content, tags, changed_at, content_hash)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            memory.id,
-            memory.category,
-            memory.content,
-            ",".join(memory.tags),
-            memory.changed_at,
-            content_hash,
-        ))
-
-    # Update file hash
-    cursor.execute("DELETE FROM file_hashes")
-    cursor.execute(
-        "INSERT INTO file_hashes (filepath, hash, last_sync) VALUES (?, ?, ?)",
-        (str(KNOWLEDGE_FILE), compute_file_hash(KNOWLEDGE_FILE), datetime.now().isoformat())
-    )
-
-    conn.commit()
-
 
 def generate_memory_id(category: str, content: str) -> str:
     """Generate a unique ID for a memory."""
@@ -373,14 +212,84 @@ def generate_memory_id(category: str, content: str) -> str:
     return f"{category[:3]}-{timestamp}-{content_hash}"
 
 
+def tokenize(text: str) -> list[str]:
+    """Tokenize text into lowercase words."""
+    # Split on non-alphanumeric characters, keep hyphenated words
+    words = re.findall(r'[a-zA-Z0-9][-a-zA-Z0-9]*', text.lower())
+    return words
+
+
+def calculate_match_score(memory: Memory, keywords: list[str]) -> int:
+    """Calculate how many keywords match in a memory.
+
+    Searches in: content, category, tags, and ID.
+    Returns count of matching keywords (higher = better).
+    """
+    # Build searchable text
+    searchable = f"{memory.content} {memory.category} {' '.join(memory.tags)} {memory.id}".lower()
+
+    score = 0
+    for keyword in keywords:
+        keyword_lower = keyword.lower()
+        # Exact word match or substring match
+        if keyword_lower in searchable:
+            score += 1
+            # Bonus for multiple occurrences
+            score += searchable.count(keyword_lower) - 1
+
+    return score
+
+
+def search_memories(
+    query: str,
+    memories: list[Memory],
+    limit: int = 10,
+    category: str | None = None,
+) -> list[tuple[Memory, int]]:
+    """Search memories using keyword matching.
+
+    Returns list of (memory, score) tuples sorted by score desc, then recency.
+    """
+    keywords = tokenize(query)
+    if not keywords:
+        return []
+
+    # Filter by category if specified
+    if category:
+        safe_category = sanitize_category(category)
+        memories = [m for m in memories if m.category == safe_category]
+
+    # Score each memory
+    scored = []
+    for memory in memories:
+        score = calculate_match_score(memory, keywords)
+        if score > 0:
+            scored.append((memory, score))
+
+    # Sort by score (desc), then by changed_at (desc for recency)
+    scored.sort(key=lambda x: (x[1], x[0].changed_at or ""), reverse=True)
+
+    return scored[:limit]
+
+
+def calculate_age_days(changed_at: str) -> int:
+    """Calculate age in days from changed_at timestamp."""
+    if not changed_at:
+        return 9999  # Very old if no timestamp
+    try:
+        dt = datetime.fromisoformat(changed_at)
+        age = datetime.now() - dt
+        return max(1, age.days)
+    except (ValueError, TypeError):
+        return 9999
+
+
 # =============================================================================
 # COMMANDS
 # =============================================================================
 
 def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[str, Any]:
     """Add a new memory."""
-    init_database()
-
     # Sanitize category
     safe_category = sanitize_category(category)
 
@@ -399,64 +308,11 @@ def cmd_add(category: str, content: str, tags: list[str] | None = None) -> dict[
     # Write to knowledge file
     add_memory_to_file(memory)
 
-    # Sync to database
-    conn = get_db_connection()
-    sync_from_file(conn, force=True)
-    conn.close()
-
     return {
         "status": "success",
         "message": f"Memory added with ID: {memory_id}",
         "memory": memory.to_dict(),
     }
-
-
-def escape_fts5_query(query: str) -> str:
-    """Escape special FTS5 characters and wrap in quotes for safe searching.
-
-    This creates an EXACT PHRASE search. For keyword OR search, use build_or_query().
-    """
-    # FTS5 special characters: " * : ^ ( ) -
-    # Escape by wrapping entire query in quotes after escaping internal quotes
-    escaped = query.replace('"', '""')
-    return f'"{escaped}"'
-
-
-def build_or_query(query: str) -> str:
-    """Build an FTS5 OR query from space-separated keywords.
-
-    Tokenizes the input and creates a query that matches ANY of the keywords.
-    Each keyword is quoted for safety and connected with OR.
-
-    Example: "vespa-linux server docker" -> '"vespa-linux" OR "server" OR "docker"'
-
-    Also supports prefix matching with * for partial matches.
-    """
-    # Handle explicit quoted phrases - pass through as-is
-    if query.startswith('"') and query.endswith('"'):
-        return escape_fts5_query(query[1:-1])
-
-    # Tokenize: split on whitespace and filter empty tokens
-    tokens = [t.strip() for t in query.split() if t.strip()]
-
-    if not tokens:
-        return '""'
-
-    if len(tokens) == 1:
-        # Single token: escape and add prefix wildcard for partial matches
-        escaped = tokens[0].replace('"', '""')
-        # Return both exact and prefix match
-        return f'"{escaped}" OR "{escaped}"*'
-
-    # Multiple tokens: create OR query with prefix matching
-    or_parts = []
-    for token in tokens:
-        escaped = token.replace('"', '""')
-        # Each token matches exact or prefix
-        or_parts.append(f'"{escaped}"')
-        or_parts.append(f'"{escaped}"*')
-
-    return " OR ".join(or_parts)
 
 
 def cmd_search(
@@ -465,69 +321,29 @@ def cmd_search(
     category: str | None = None,
     mode: str = "keywords",
 ) -> dict[str, Any]:
-    """Search memories using FTS5 with recency boost.
+    """Search memories using keyword matching.
 
     Args:
         query: Search query string
         limit: Maximum number of results
         category: Optional category filter
-        mode: Search mode - "keywords" for OR search (default), "phrase" for exact phrase
-
-    Ranking combines BM25 relevance with recency:
-    - BM25 score measures text relevance (lower = better match)
-    - Recency factor boosts newer memories
-    - Formula: bm25_score - (recency_weight / age_days)
+        mode: Search mode (kept for compatibility, always uses keyword matching)
     """
-    init_database()
-    conn = get_db_connection()
-
-    # Auto-sync before search
-    sync_from_file(conn)
-
-    cursor = conn.cursor()
-
-    # Build FTS5 query based on mode
-    if mode == "keywords":
-        safe_query = build_or_query(query)
-    else:
-        safe_query = escape_fts5_query(query)
-
-    # Recency-boosted ranking:
-    # - bm25() returns negative scores (more negative = better match)
-    # - We subtract a recency bonus (newer = larger bonus = more negative final score)
-    # - age_days = days since last change (minimum 1 to avoid division issues)
-    # - recency_bonus = 10.0 / age_days (recently changed memories get bigger bonus)
-    recency_sql = """
-        SELECT m.id, m.category, m.content, m.tags, m.changed_at,
-               bm25(memories_fts) as bm25_score,
-               MAX(1, julianday('now') - julianday(COALESCE(m.changed_at, '2020-01-01'))) as age_days,
-               bm25(memories_fts) - (10.0 / MAX(1, julianday('now') - julianday(COALESCE(m.changed_at, '2020-01-01')))) as rank
-        FROM memories m
-        JOIN memories_fts ON m.rowid = memories_fts.rowid
-        WHERE memories_fts MATCH ?
-    """
-
-    if category:
-        safe_category = sanitize_category(category)
-        cursor.execute(recency_sql + " AND m.category = ? ORDER BY rank LIMIT ?",
-                      (safe_query, safe_category, limit))
-    else:
-        cursor.execute(recency_sql + " ORDER BY rank LIMIT ?",
-                      (safe_query, limit))
+    memories = parse_knowledge_file()
+    scored_results = search_memories(query, memories, limit=limit, category=category)
 
     results = []
-    for row in cursor.fetchall():
+    for memory, score in scored_results:
+        age_days = calculate_age_days(memory.changed_at)
         results.append({
-            "id": row["id"],
-            "category": row["category"],
-            "content": row["content"],
-            "tags": [t for t in row["tags"].split(",") if t] if row["tags"] else [],
-            "changed_at": row["changed_at"],
-            "age_days": int(row["age_days"]),
-            "relevance": -row["bm25_score"],  # BM25 returns negative scores
+            "id": memory.id,
+            "category": memory.category,
+            "content": memory.content,
+            "tags": memory.tags,
+            "changed_at": memory.changed_at,
+            "age_days": age_days,
+            "relevance": score,
         })
-
-    conn.close()
 
     return {
         "query": query,
@@ -537,12 +353,8 @@ def cmd_search(
 
 
 def cmd_context(topic: str, limit: int = 5) -> dict[str, Any]:
-    """Get a context block for a topic - formatted for injection into prompts.
-
-    Uses keyword (OR) search mode to find memories matching ANY of the provided
-    keywords. This is more flexible than exact phrase matching for context retrieval.
-    """
-    result = cmd_search(topic, limit=limit, mode="keywords")
+    """Get a context block for a topic - formatted for injection into prompts."""
+    result = cmd_search(topic, limit=limit)
 
     if not result["results"]:
         return {
@@ -570,42 +382,28 @@ def cmd_context(topic: str, limit: int = 5) -> dict[str, Any]:
 
 def cmd_list(category: str | None = None, limit: int = 50) -> dict[str, Any]:
     """List all memories, optionally filtered by category."""
-    init_database()
-    conn = get_db_connection()
+    memories = parse_knowledge_file()
 
-    # Auto-sync
-    sync_from_file(conn)
-
-    cursor = conn.cursor()
-
+    # Filter by category if specified
     if category:
         safe_category = sanitize_category(category)
-        cursor.execute("""
-            SELECT id, category, content, tags, changed_at
-            FROM memories
-            WHERE category = ?
-            ORDER BY changed_at DESC
-            LIMIT ?
-        """, (safe_category, limit))
-    else:
-        cursor.execute("""
-            SELECT id, category, content, tags, changed_at
-            FROM memories
-            ORDER BY changed_at DESC
-            LIMIT ?
-        """, (limit,))
+        memories = [m for m in memories if m.category == safe_category]
+
+    # Sort by changed_at descending (most recent first)
+    memories.sort(key=lambda m: m.changed_at or "", reverse=True)
+
+    # Apply limit
+    memories = memories[:limit]
 
     results = []
-    for row in cursor.fetchall():
+    for memory in memories:
         results.append({
-            "id": row["id"],
-            "category": row["category"],
-            "content": row["content"][:100] + "..." if len(row["content"]) > 100 else row["content"],
-            "tags": [t for t in row["tags"].split(",") if t] if row["tags"] else [],
-            "changed_at": row["changed_at"],
+            "id": memory.id,
+            "category": memory.category,
+            "content": memory.content[:100] + "..." if len(memory.content) > 100 else memory.content,
+            "tags": memory.tags,
+            "changed_at": memory.changed_at,
         })
-
-    conn.close()
 
     return {
         "count": len(results),
@@ -614,41 +412,14 @@ def cmd_list(category: str | None = None, limit: int = 50) -> dict[str, Any]:
     }
 
 
-def cmd_rebuild() -> dict[str, Any]:
-    """Force rebuild the index from markdown files."""
-    init_database()
-    conn = get_db_connection()
-    sync_from_file(conn, force=True)
-
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) as count FROM memories")
-    count = cursor.fetchone()["count"]
-
-    conn.close()
-
-    return {
-        "status": "success",
-        "message": f"Index rebuilt with {count} memories",
-        "count": count,
-    }
-
-
 def cmd_delete(memory_id: str) -> dict[str, Any]:
     """Delete a memory by ID."""
-    init_database()
-    conn = get_db_connection()
-
-    # Delete from knowledge file
     if delete_memory_from_file(memory_id):
-        # Sync database
-        sync_from_file(conn, force=True)
-        conn.close()
         return {
             "status": "success",
             "message": f"Memory deleted: {memory_id}",
         }
 
-    conn.close()
     return {
         "status": "error",
         "message": f"Failed to delete memory: {memory_id}",
@@ -656,84 +427,54 @@ def cmd_delete(memory_id: str) -> dict[str, Any]:
 
 
 def cmd_stats() -> dict[str, Any]:
-    """Get statistics about the memory database."""
-    init_database()
-    conn = get_db_connection()
-    sync_from_file(conn)
-
-    cursor = conn.cursor()
-
-    # Total count
-    cursor.execute("SELECT COUNT(*) as count FROM memories")
-    total = cursor.fetchone()["count"]
+    """Get statistics about the memory storage."""
+    memories = parse_knowledge_file()
 
     # Count by category
-    cursor.execute("""
-        SELECT category, COUNT(*) as count
-        FROM memories
-        GROUP BY category
-        ORDER BY count DESC
-    """)
-    by_category = {row["category"]: row["count"] for row in cursor.fetchall()}
+    by_category: dict[str, int] = {}
+    for memory in memories:
+        by_category[memory.category] = by_category.get(memory.category, 0) + 1
 
-    conn.close()
+    # Sort by count descending
+    by_category = dict(sorted(by_category.items(), key=lambda x: x[1], reverse=True))
 
     return {
-        "total_memories": total,
+        "total_memories": len(memories),
         "by_category": by_category,
         "knowledge_file": str(KNOWLEDGE_FILE),
-        "database": str(DB_PATH),
     }
 
 
 def cmd_maintain() -> dict[str, Any]:
-    """Maintain database: analyze age distribution and check health."""
-    init_database()
-    conn = get_db_connection()
-    sync_from_file(conn)
-
-    cursor = conn.cursor()
+    """Analyze memory age distribution."""
+    memories = parse_knowledge_file()
 
     # Age distribution (based on last change)
-    cursor.execute("""
-        SELECT
-            CASE
-                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 7 THEN 'last_week'
-                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 30 THEN 'last_month'
-                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 90 THEN 'last_quarter'
-                WHEN julianday('now') - julianday(COALESCE(changed_at, '2020-01-01')) <= 365 THEN 'last_year'
-                ELSE 'older'
-            END as age_bucket,
-            COUNT(*) as count
-        FROM memories
-        GROUP BY age_bucket
-    """)
-    age_distribution = {row["age_bucket"]: row["count"] for row in cursor.fetchall()}
-
-    # Ensure all buckets exist
-    for bucket in ["last_week", "last_month", "last_quarter", "last_year", "older"]:
-        if bucket not in age_distribution:
-            age_distribution[bucket] = 0
-
-    result = {
-        "age_distribution": age_distribution,
-        "total_memories": sum(age_distribution.values()),
+    age_distribution = {
+        "last_week": 0,
+        "last_month": 0,
+        "last_quarter": 0,
+        "last_year": 0,
+        "older": 0,
     }
 
-    # Database integrity check
-    cursor.execute("PRAGMA integrity_check")
-    integrity = cursor.fetchone()[0]
-    result["db_integrity"] = integrity
+    for memory in memories:
+        age_days = calculate_age_days(memory.changed_at)
+        if age_days <= 7:
+            age_distribution["last_week"] += 1
+        elif age_days <= 30:
+            age_distribution["last_month"] += 1
+        elif age_days <= 90:
+            age_distribution["last_quarter"] += 1
+        elif age_days <= 365:
+            age_distribution["last_year"] += 1
+        else:
+            age_distribution["older"] += 1
 
-    # FTS index status
-    cursor.execute("SELECT COUNT(*) FROM memories_fts")
-    fts_count = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM memories")
-    mem_count = cursor.fetchone()[0]
-    result["index_synced"] = fts_count == mem_count
-
-    conn.close()
-    return result
+    return {
+        "age_distribution": age_distribution,
+        "total_memories": len(memories),
+    }
 
 
 # =============================================================================
@@ -784,7 +525,7 @@ def format_output(data: dict[str, Any], output_format: str = "text") -> str:
         return "\n".join(lines)
 
     if "age_distribution" in data:
-        lines = ["Database Maintenance Report", "=" * 30]
+        lines = ["Memory Age Report", "=" * 30]
         lines.append(f"\nTotal memories: {data['total_memories']}")
         lines.append("\nAge distribution (by last change):")
         order = ["last_week", "last_month", "last_quarter", "last_year", "older"]
@@ -793,9 +534,6 @@ def format_output(data: dict[str, Any], output_format: str = "text") -> str:
         for bucket in order:
             count = data["age_distribution"].get(bucket, 0)
             lines.append(f"  {labels[bucket]}: {count}")
-
-        lines.append(f"\nDatabase integrity: {data.get('db_integrity', 'unknown')}")
-        lines.append(f"Index synced: {'Yes' if data.get('index_synced') else 'No'}")
 
         return "\n".join(lines)
 
@@ -822,17 +560,12 @@ def main() -> None:
         epilog=f"""
 Commands:
   add <category> <content>    Add a new memory
-  search <query>              Search memories (ranked by relevance + recency)
-  context <topic>             Get context block for a topic (uses keyword OR search)
+  search <query>              Search memories (keyword matching)
+  context <topic>             Get context block for a topic
   list                        List all memories
-  rebuild                     Force rebuild index
   delete <id>                 Delete a memory
   stats                       Show statistics
-  maintain                    Check database health
-
-Search Modes:
-  --mode keywords   OR matching - finds memories with ANY keyword (default)
-  --mode phrase     Exact phrase matching
+  maintain                    Show age distribution
 
 Categories: {', '.join(CATEGORIES)}
 
@@ -840,14 +573,14 @@ Examples:
   memory.sh add discovery "The API uses OAuth2 with PKCE flow"
   memory.sh add gotcha "Redis connection pool must be closed explicitly" --tags redis,connection
   memory.sh search "authentication"
-  memory.sh search "vespa server docker" --mode keywords   # Match ANY keyword
-  memory.sh context "vespa-linux server services"          # Uses keyword mode by default
+  memory.sh search "vespa server docker"
+  memory.sh context "vespa-linux server services"
   memory.sh list --category gotcha
   memory.sh maintain
         """
     )
 
-    parser.add_argument("command", nargs="?", choices=["add", "search", "context", "list", "rebuild", "delete", "stats", "maintain"],
+    parser.add_argument("command", nargs="?", choices=["add", "search", "context", "list", "delete", "stats", "maintain"],
                         help="Command to execute")
     parser.add_argument("args", nargs="*", help="Command arguments")
     parser.add_argument("--tags", "-t", help="Comma-separated tags (for add)")
@@ -857,8 +590,6 @@ Examples:
                         help="Output format")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress non-essential output")
     parser.add_argument("--version", "-v", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--mode", "-m", choices=["phrase", "keywords"], default="keywords",
-                        help="Search mode: 'keywords' for OR search (default), 'phrase' for exact match")
 
     args = parser.parse_args()
 
@@ -882,7 +613,7 @@ Examples:
                 print("Error: search requires <query>", file=sys.stderr)
                 sys.exit(1)
             query = " ".join(args.args)
-            result = cmd_search(query, limit=args.limit, category=args.category, mode=args.mode)
+            result = cmd_search(query, limit=args.limit, category=args.category)
 
         elif args.command == "context":
             if not args.args:
@@ -893,9 +624,6 @@ Examples:
 
         elif args.command == "list":
             result = cmd_list(category=args.category, limit=args.limit)
-
-        elif args.command == "rebuild":
-            result = cmd_rebuild()
 
         elif args.command == "delete":
             if not args.args:

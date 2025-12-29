@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2025-12-30
+
+### Changed
+- **Breaking**: Removed SQLite database entirely - now pure file-based
+- Search uses simple keyword matching instead of FTS5/BM25
+- Results sorted by match count, then recency (changed_at)
+- Simplified codebase by ~400 lines
+
+### Removed
+- SQLite database and all database-related code
+- `rebuild` command (no longer needed without database)
+- `--mode` search option (always uses keyword matching)
+- BM25 relevance ranking (replaced with keyword counting)
+- Database integrity checks in `maintain` command
+
+### Added
+- `tokenize()` function for keyword extraction
+- `calculate_match_score()` for simple relevance scoring
+- `search_memories()` for file-based search
+
 ## [2.0.0] - 2025-12-30
 
 ### Changed
