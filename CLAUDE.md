@@ -1,94 +1,86 @@
 # Memory System
 
-Two-tier memory: **Long-term Knowledge** (`knowledge.md`) and **Session Memory** (`session.md`).
+Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) temporary.
 
-## Long-term Knowledge
-
-Permanent memory across sessions.
-
-### Before Tasks (MANDATORY)
+## Before Any Task
 
 ```bash
 ./.claude/tools/memory.sh context "<keywords>"
 ```
 
-### Save Discoveries
+Extract keywords from: entities mentioned, technologies, service names, error types. Use multiple keywords.
 
-| Category | Example |
-|----------|---------|
-| `architecture` | "Auth service calls user-db via gRPC:50051" |
-| `gotcha` | "Redis pool exhausts without explicit close()" |
-| `pattern` | "Handlers: validate → process → {data,error,meta}" |
-| `config` | "Prod: PostgreSQL 15, Dev: SQLite" |
-| `entity` | "UserService.authenticate() handles OAuth/SAML" |
-| `decision` | "Redis over Memcached: need pub/sub" |
-| `discovery` | "Memory leak from unclosed file handles" |
+**Skip only for:** single-line trivial fixes.
+
+## Save Discoveries
+
+Save **immediately** when discovering something worth remembering:
 
 ```bash
 ./.claude/tools/memory.sh add <category> "<content>" [--tags a,b,c]
 ```
 
-**Skip**: Trivial info, grep-able content, duplicates.
+| Category | Save When |
+|----------|-----------|
+| `architecture` | System design, service connections, ports |
+| `gotcha` | Bugs, pitfalls, non-obvious behavior |
+| `pattern` | Code conventions, recurring structures |
+| `config` | Environment settings, credentials locations |
+| `entity` | Important classes, functions, APIs |
+| `decision` | Why choices were made |
+| `discovery` | New findings about codebase |
+| `todo` | Long-term tasks to remember |
+| `reference` | Useful links, documentation |
+| `context` | Background info, project context |
 
-### Mandatory Save Checkpoints
+**Tags:** Use for cross-cutting concerns (e.g., `--tags redis,production,auth`).
 
-BEFORE completing any task: save relevant findings and include "**Memories saved:** [list]" in response.
+**Skip:** Trivial info, easily grep-able content, duplicates.
 
-### Other Commands
+**After tasks:** State "**Memories saved:** [list]" or "**Memories saved:** None"
+
+**Stale memories:** If found outdated info, delete with `memory.sh delete <id>`.
+
+## Other Knowledge Commands
 
 ```bash
-./.claude/tools/memory.sh search "<query>"
+./.claude/tools/memory.sh search "<query>" [--category CAT]
 ./.claude/tools/memory.sh list [--category CAT]
 ./.claude/tools/memory.sh delete <id>
+./.claude/tools/memory.sh stats
 ```
 
 ---
 
 ## Session Memory
 
-Temporary work state that survives context compaction. Clear when work completes.
+Tracks **current task** work. Survives context compaction.
 
-### Categories
+**Use for:** Plans, in-progress todos, blockers, progress logs.
+**Use Knowledge for:** Lasting discoveries that apply beyond this task.
 
-| Category | Purpose |
-|----------|---------|
-| `plan` | Implementation plans, task breakdowns |
-| `todo` | Tasks with status: `pending` / `in_progress` / `completed` / `blocked` |
-| `progress` | Log of completed work |
-| `note` | General session info |
-| `blocker` | Issues blocking progress |
+**Categories:** `plan`, `todo`, `progress`, `note`, `context`, `decision`, `blocker`
 
-### Commands
+**Statuses:** `pending` → `in_progress` → `completed` | `blocked`
 
 ```bash
-# Add
-./.claude/tools/memory.sh session add plan "1. Add auth 2. Add tests"
-./.claude/tools/memory.sh session add todo "Implement JWT" --status pending
+# Add entries
+./.claude/tools/memory.sh session add todo "Task description" --status pending
+./.claude/tools/memory.sh session add plan "Step 1... Step 2..."
+./.claude/tools/memory.sh session add blocker "Waiting for X"
+./.claude/tools/memory.sh session add progress "Completed auth module"
 
 # View
 ./.claude/tools/memory.sh session show
-./.claude/tools/memory.sh session list [--category todo] [--status pending]
+./.claude/tools/memory.sh session list [--status pending]
 
-# Manage
+# Update
 ./.claude/tools/memory.sh session update <id> --status completed
+
+# Cleanup
 ./.claude/tools/memory.sh session delete <id>
-./.claude/tools/memory.sh session archive <id> [--category gotcha]  # Move to knowledge
-./.claude/tools/memory.sh session clear
+./.claude/tools/memory.sh session clear                      # When task fully complete
+./.claude/tools/memory.sh session archive <id> [--category CAT]  # Move to knowledge
 ```
 
-### When to Use Which
-
-**Session**: Current task plans, WIP todos, progress logs, blockers.
-**Long-term**: Architecture, patterns, gotchas, configs, decisions with lasting impact.
-
-### Save Often (CRITICAL)
-
-Session memory survives context compaction. Save state frequently so work can resume from any point:
-
-1. **Start of task**: Save plan with all steps
-2. **Before each step**: Mark todo as `in_progress`
-3. **After each step**: Log progress, mark todo `completed`
-4. **On any blocker**: Save blocker immediately
-5. **Before responding**: Update all statuses
-
-If context is compacted or session interrupted, run `session show` to restore full state.
+**Recovery:** After context compaction, run `session show` to restore state.
