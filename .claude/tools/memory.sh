@@ -1,6 +1,9 @@
 #!/bin/bash
 # Wrapper script for memory.py using uv
 
+# Force UTF-8 encoding for Python output (needed for Windows)
+export PYTHONIOENCODING=utf-8
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Install uv if not present

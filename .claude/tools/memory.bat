@@ -3,6 +3,9 @@ setlocal enabledelayedexpansion
 
 REM Wrapper script for memory.py using uv
 
+REM Force UTF-8 encoding for Python output
+set "PYTHONIOENCODING=utf-8"
+
 set "SCRIPT_DIR=%~dp0"
 
 REM Check if uv is available
