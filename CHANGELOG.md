@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] - 2026-01-18 - "Session Isolation Edition"
+
+### Added
+- **Session isolation**: Multiple CLI instances and agents can now work in parallel without conflicts
+- `Session:` field in session entries to track which session owns each entry
+- `.claude/current_session` pointer file for automatic session recovery after context compaction
+- `--session` / `-S` CLI flag to specify session name
+- `MEMORY_SESSION` environment variable support for agent isolation
+- New commands:
+  - `session use <name>`: Switch to a named session (saves to pointer file)
+  - `session current`: Show current session resolution info
+  - `session sessions`: List all sessions with entry counts
+  - `session list-all`: List entries from all sessions
+  - `session show-all`: Show state of all sessions
+- `--all` flag for `session clear` to explicitly clear all sessions
+
+### Changed
+- `session add`, `session list`, `session show` now filter by current session
+- `session clear` now only clears the current session (use `--all` for full wipe)
+- Session resolution priority: CLI flag → environment variable → pointer file → "default"
+- Updated documentation in CLAUDE.md and README.md
+
+### Why This Release
+When working on the same repository with multiple Claude Code instances or agents,
+one instance clearing its session would delete data for all others. This release
+adds session namespacing so each CLI/agent can work independently, and the pointer
+file ensures session context survives context compaction.
+
 ## [5.0.0] - 2025-12-30 - "Lean Edition"
 
 ### Changed
