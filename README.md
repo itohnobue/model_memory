@@ -31,27 +31,6 @@ Claude Code forgets everything between sessions and after context compaction. Th
 - **Zero setup**: Auto-installs Python via uv
 - **Cross-platform**: macOS, Linux, Windows
 
-## Session Isolation (v5.1+)
-
-Multiple CLI instances and agents can work without conflicts:
-
-```bash
-# Switch to a named session
-memory.sh session use feature-auth
-
-# Or use environment variable (for agents)
-export MEMORY_SESSION=agent-explore
-
-# Or use -S flag for one-off commands
-memory.sh session -S other-task add todo "..."
-```
-
-Session resolution priority:
-1. `--session` / `-S` flag
-2. `MEMORY_SESSION` environment variable
-3. `.claude/current_session` pointer file
-4. `"default"` fallback
-
 ## Categories
 
 **Knowledge (10):** `architecture`, `discovery`, `pattern`, `gotcha`, `config`, `entity`, `decision`, `todo`, `reference`, `context`

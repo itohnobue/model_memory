@@ -2,15 +2,14 @@
 
 Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) temporary.
 
-## Session Isolation
+## Quick Decision
 
-Multiple CLI instances and agents can work in parallel without conflicts. Each session is isolated by name.
-
-**Session resolution priority:**
-1. `--session` / `-S` flag (explicit)
-2. `MEMORY_SESSION` environment variable
-3. `.claude/current_session` pointer file
-4. `"default"` fallback
+| Question | Use |
+|----------|-----|
+| Will this help in future sessions? | **Knowledge** |
+| Is this about current task only? | **Session** |
+| Discovered a gotcha/pattern/config? | **Knowledge** |
+| Tracking todos/progress/blockers? | **Session** |
 
 ## Before Any Task
 
@@ -18,16 +17,14 @@ Multiple CLI instances and agents can work in parallel without conflicts. Each s
 ./.claude/tools/memory.sh context "<keywords>"
 ```
 
-Extract keywords from: entities mentioned, technologies, service names, error types. Use multiple keywords.
+Extract keywords from: entities, technologies, service names, error types.
 
 **Skip only for:** single-line trivial fixes.
 
-## Save Discoveries
-
-Save **immediately** when discovering something worth remembering:
+## Save to Knowledge
 
 ```bash
-./.claude/tools/memory.sh add <category> "<content>" [--tags a,b,c]
+memory.sh add <category> "<content>" [--tags a,b,c]
 ```
 
 | Category | Save When |
@@ -43,97 +40,68 @@ Save **immediately** when discovering something worth remembering:
 | `reference` | Useful links, documentation |
 | `context` | Background info, project context |
 
-**Tags:** Use for cross-cutting concerns (e.g., `--tags redis,production,auth`).
+**Tags:** Cross-cutting concerns (e.g., `--tags redis,production,auth`).
 
 **Skip:** Trivial info, easily grep-able content, duplicates.
 
 **After tasks:** State "**Memories saved:** [list]" or "**Memories saved:** None"
 
-**Stale memories:** If found outdated info, delete with `memory.sh delete <id>`.
+**Stale memories:** Delete with `memory.sh delete <id>`.
 
-## Other Knowledge Commands
-
-```bash
-./.claude/tools/memory.sh search "<query>" [--category CAT]
-./.claude/tools/memory.sh list [--category CAT]
-./.claude/tools/memory.sh delete <id>
-./.claude/tools/memory.sh stats
-```
+**Other:** `search "<query>"`, `list [--category CAT]`, `delete <id>`, `stats`
 
 ---
 
 ## Session Memory
 
-Tracks **current task** work. Survives context compaction.
-
-**Use for:** Plans, in-progress todos, blockers, progress logs.
-**Use Knowledge for:** Lasting discoveries that apply beyond this task.
+Tracks current task. **Persists until explicitly cleared.**
 
 **Categories:** `plan`, `todo`, `progress`, `note`, `context`, `decision`, `blocker`
 
 **Statuses:** `pending` → `in_progress` → `completed` | `blocked`
 
-### Session Isolation
-
-Switch to a named session for parallel work:
+### Commands
 
 ```bash
-# Switch session (saves to pointer file for recovery)
-./.claude/tools/memory.sh session use feature-auth
+# Add
+memory.sh session add todo "Task" --status pending
+memory.sh session add plan "Step 1... Step 2..."
 
-# Check current session
-./.claude/tools/memory.sh session current
+# View
+memory.sh session show
+memory.sh session list [--status pending]
 
-# List all sessions
-./.claude/tools/memory.sh session sessions
-```
-
-**For agents:** Use environment variable (doesn't update pointer file):
-
-```bash
-export MEMORY_SESSION=agent-explore-$$
-```
-
-Or use `-S` flag for one-off commands:
-
-```bash
-./.claude/tools/memory.sh session -S agent-task add todo "..."
-```
-
-### Session Commands
-
-```bash
-# Add entries (to current session)
-./.claude/tools/memory.sh session add todo "Task description" --status pending
-./.claude/tools/memory.sh session add plan "Step 1... Step 2..."
-./.claude/tools/memory.sh session add blocker "Waiting for X"
-./.claude/tools/memory.sh session add progress "Completed auth module"
-
-# View current session
-./.claude/tools/memory.sh session show
-./.claude/tools/memory.sh session list [--status pending]
-
-# View all sessions
-./.claude/tools/memory.sh session show-all
-./.claude/tools/memory.sh session list-all
-
-# Update
-./.claude/tools/memory.sh session update <id> --status completed
+# Update/Delete
+memory.sh session update <id> --status completed
+memory.sh session delete <id>
 
 # Cleanup
-./.claude/tools/memory.sh session delete <id>
-./.claude/tools/memory.sh session clear                      # Clear current session only
-./.claude/tools/memory.sh session clear --all                # Clear ALL sessions
-./.claude/tools/memory.sh session archive <id> [--category CAT]  # Move to knowledge
+memory.sh session clear           # Current session only
+memory.sh session clear --all     # ALL sessions
+memory.sh session archive <id>    # Move to knowledge
 ```
 
-### Recovery After Context Compaction
+### Multi-Session (Parallel Work)
 
-The tool automatically remembers which session you were using via the pointer file:
+Multiple CLI instances/agents can work without conflicts.
+
+**Resolution priority:**
+1. `-S` / `--session` flag
+2. `MEMORY_SESSION` environment variable
+3. `.claude/current_session` pointer file
+4. `"default"`
 
 ```bash
-./.claude/tools/memory.sh session show
+# Interactive: switch session (saved to pointer file)
+memory.sh session use feature-auth
+
+# Agents: use env var (no pointer update)
+export MEMORY_SESSION=agent-$$
+
+# One-off: use -S flag
+memory.sh -S other session add todo "..."
+
+# View all
+memory.sh session sessions      # List sessions
+memory.sh session show-all      # Show all content
 ```
-
-This reads from `.claude/current_session` and shows the correct session state.
-
