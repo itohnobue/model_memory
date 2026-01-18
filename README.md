@@ -39,31 +39,6 @@ Claude Code forgets everything between sessions and after context compaction. Th
 
 **Statuses (4):** `pending`, `in_progress`, `completed`, `blocked`
 
-## Commands
-
-**Knowledge:**
-- `add <category> <content>` - Add a memory
-- `search <query>` - Search memories
-- `context <topic>` - Get context for topic
-- `list` - List memories
-- `delete <id>` - Delete a memory
-- `stats` - Show statistics
-
-**Session:**
-- `session add <cat> <content>` - Add entry
-- `session list` - List current session entries
-- `session show` - Show current session state
-- `session update <id> --status <s>` - Update status
-- `session delete <id>` - Delete entry
-- `session clear` - Clear current session
-- `session clear --all` - Clear ALL sessions
-- `session archive <id>` - Move to knowledge
-- `session use <name>` - Switch session
-- `session current` - Show session info
-- `session sessions` - List all sessions
-- `session list-all` - List all entries
-- `session show-all` - Show all sessions
-
 ## License
 
 MIT
