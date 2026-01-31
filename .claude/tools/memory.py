@@ -39,6 +39,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+if sys.platform == "win32" and hasattr(sys.stdout, "buffer"):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 __version__ = "5.0.0"
 
 
