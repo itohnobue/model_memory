@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Unit tests for memory.py v5.0.0 - Lean Edition"""
+"""Unit tests for memory.py v5.1.0 - Session Isolation Edition"""
 
+import os
+import shutil
 import sys
 import tempfile
-import shutil
 from pathlib import Path
 
 import pytest
@@ -18,15 +19,24 @@ import memory
 def temp_project():
     """Create a temporary project directory for testing."""
     temp_dir = tempfile.mkdtemp()
+    claude_dir = Path(temp_dir) / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
 
     # Override paths
     original_project_root = memory.PROJECT_ROOT
     original_knowledge_file = memory.KNOWLEDGE_FILE
     original_session_file = memory.SESSION_FILE
+    original_pointer_file = memory.SESSION_POINTER_FILE
 
     memory.PROJECT_ROOT = Path(temp_dir)
     memory.KNOWLEDGE_FILE = Path(temp_dir) / "knowledge.md"
     memory.SESSION_FILE = Path(temp_dir) / "session.md"
+    memory.SESSION_POINTER_FILE = claude_dir / "current_session"
+
+    # Clear any environment variable
+    original_env = os.environ.get("MEMORY_SESSION")
+    if "MEMORY_SESSION" in os.environ:
+        del os.environ["MEMORY_SESSION"]
 
     yield temp_dir
 
@@ -34,6 +44,11 @@ def temp_project():
     memory.PROJECT_ROOT = original_project_root
     memory.KNOWLEDGE_FILE = original_knowledge_file
     memory.SESSION_FILE = original_session_file
+    memory.SESSION_POINTER_FILE = original_pointer_file
+
+    # Restore environment
+    if original_env is not None:
+        os.environ["MEMORY_SESSION"] = original_env
 
     # Cleanup
     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -71,6 +86,7 @@ class TestSessionEntryDataclass:
             id="s-pla-20241230-abc1",
             category="plan",
             content="Test plan",
+            session="test-session",
             status="pending",
             changed_at="2024-12-30T10:00:00"
         )
@@ -79,6 +95,7 @@ class TestSessionEntryDataclass:
         assert result["id"] == "s-pla-20241230-abc1"
         assert result["category"] == "plan"
         assert result["content"] == "Test plan"
+        assert result["session"] == "test-session"
         assert result["status"] == "pending"
         assert result["changed_at"] == "2024-12-30T10:00:00"
 
@@ -91,6 +108,11 @@ class TestSessionEntryDataclass:
         result = entry.to_dict()
 
         assert "status" not in result
+        assert result["session"] == memory.DEFAULT_SESSION
+
+    def test_default_session(self):
+        entry = memory.SessionEntry(id="test", category="note", content="test")
+        assert entry.session == memory.DEFAULT_SESSION
 
 
 class TestGenerateMemoryId:
@@ -323,11 +345,13 @@ class TestSessionCommands:
 
         result = memory.cmd_session_show()
         assert "context" in result
-        assert "Current Session" in result["context"]
+        assert "Session:" in result["context"]
+        assert result["session"] == memory.DEFAULT_SESSION
 
     def test_session_show_empty(self, temp_project):
         result = memory.cmd_session_show()
         assert result["context"] == ""
+        assert result["session"] == memory.DEFAULT_SESSION
 
     def test_update_session_status(self, temp_project):
         add_result = memory.cmd_session_add("todo", "Task", status="pending")
@@ -401,6 +425,167 @@ class TestSessionCommands:
     def test_session_archive_nonexistent(self, temp_project):
         result = memory.cmd_session_archive("nonexistent-id")
         assert result["status"] == "error"
+
+
+class TestSessionIsolation:
+    """Tests for session isolation features."""
+
+    def test_session_use(self, temp_project):
+        result = memory.cmd_session_use("test-session")
+
+        assert result["status"] == "success"
+        assert result["session"] == "test-session"
+        assert memory.SESSION_POINTER_FILE.exists()
+        assert memory.SESSION_POINTER_FILE.read_text() == "test-session"
+
+    def test_session_current_default(self, temp_project):
+        result = memory.cmd_session_current()
+
+        assert result["effective"] == memory.DEFAULT_SESSION
+        assert result["resolution"] == "default"
+        assert result["pointer_file"] is None
+        assert result["environment"] is None
+
+    def test_session_current_from_pointer(self, temp_project):
+        memory.cmd_session_use("pointer-session")
+        result = memory.cmd_session_current()
+
+        assert result["effective"] == "pointer-session"
+        assert result["resolution"] == "pointer file"
+        assert result["pointer_file"] == "pointer-session"
+
+    def test_session_current_from_env(self, temp_project):
+        os.environ["MEMORY_SESSION"] = "env-session"
+        try:
+            result = memory.cmd_session_current()
+
+            assert result["effective"] == "env-session"
+            assert result["resolution"] == "environment variable"
+            assert result["environment"] == "env-session"
+        finally:
+            del os.environ["MEMORY_SESSION"]
+
+    def test_session_resolution_priority(self, temp_project):
+        # Set up all three sources
+        memory.cmd_session_use("pointer-session")
+        os.environ["MEMORY_SESSION"] = "env-session"
+
+        try:
+            # CLI flag should win
+            session = memory.get_current_session("cli-session")
+            assert session == "cli-session"
+
+            # Env should beat pointer
+            session = memory.get_current_session(None)
+            assert session == "env-session"
+
+            # Without env, pointer wins
+            del os.environ["MEMORY_SESSION"]
+            session = memory.get_current_session(None)
+            assert session == "pointer-session"
+        finally:
+            if "MEMORY_SESSION" in os.environ:
+                del os.environ["MEMORY_SESSION"]
+
+    def test_add_entry_to_specific_session(self, temp_project):
+        result = memory.cmd_session_add("todo", "Task 1", session="session-a")
+        assert result["entry"]["session"] == "session-a"
+
+        result = memory.cmd_session_add("todo", "Task 2", session="session-b")
+        assert result["entry"]["session"] == "session-b"
+
+    def test_list_filters_by_session(self, temp_project):
+        memory.cmd_session_add("todo", "Task A", session="session-a")
+        memory.cmd_session_add("todo", "Task B", session="session-b")
+        memory.cmd_session_add("todo", "Task C", session="session-a")
+
+        result = memory.cmd_session_list(session="session-a")
+        assert result["count"] == 2
+        assert result["session"] == "session-a"
+        assert all(r["session"] == "session-a" for r in result["results"])
+
+        result = memory.cmd_session_list(session="session-b")
+        assert result["count"] == 1
+        assert result["session"] == "session-b"
+
+    def test_show_filters_by_session(self, temp_project):
+        memory.cmd_session_add("plan", "Plan A", session="session-a")
+        memory.cmd_session_add("plan", "Plan B", session="session-b")
+
+        result = memory.cmd_session_show(session="session-a")
+        assert "Plan A" in result["context"]
+        assert "Plan B" not in result["context"]
+        assert result["session"] == "session-a"
+
+    def test_clear_only_current_session(self, temp_project):
+        memory.cmd_session_add("todo", "Task A", session="session-a")
+        memory.cmd_session_add("todo", "Task B", session="session-b")
+
+        # Clear session-a
+        result = memory.cmd_session_clear(session="session-a")
+        assert result["status"] == "success"
+        assert "session-a" in result["message"]
+
+        # Verify session-a is empty but session-b is not
+        result = memory.cmd_session_list(session="session-a")
+        assert result["count"] == 0
+
+        result = memory.cmd_session_list(session="session-b")
+        assert result["count"] == 1
+
+    def test_clear_all_sessions(self, temp_project):
+        memory.cmd_session_add("todo", "Task A", session="session-a")
+        memory.cmd_session_add("todo", "Task B", session="session-b")
+
+        result = memory.cmd_session_clear(clear_all=True)
+        assert result["status"] == "success"
+        assert "all" in result["message"].lower()
+
+        # Verify all sessions are empty
+        result = memory.cmd_session_sessions()
+        assert result["total_entries"] == 0
+
+    def test_session_sessions(self, temp_project):
+        memory.cmd_session_add("todo", "Task 1", session="session-a")
+        memory.cmd_session_add("todo", "Task 2", session="session-a")
+        memory.cmd_session_add("todo", "Task 3", session="session-b")
+
+        result = memory.cmd_session_sessions()
+
+        assert result["total_entries"] == 3
+        assert "session-a" in result["sessions"]
+        assert "session-b" in result["sessions"]
+        assert result["sessions"]["session-a"] == 2
+        assert result["sessions"]["session-b"] == 1
+
+    def test_session_list_all(self, temp_project):
+        memory.cmd_session_add("todo", "Task A", session="session-a")
+        memory.cmd_session_add("todo", "Task B", session="session-b")
+
+        result = memory.cmd_session_list_all()
+
+        assert result["count"] == 2
+        sessions = [r["session"] for r in result["results"]]
+        assert "session-a" in sessions
+        assert "session-b" in sessions
+
+    def test_session_show_all(self, temp_project):
+        memory.cmd_session_add("plan", "Plan A", session="session-a")
+        memory.cmd_session_add("plan", "Plan B", session="session-b")
+
+        result = memory.cmd_session_show_all()
+
+        assert "session-a" in result["context"]
+        assert "session-b" in result["context"]
+        assert "Plan A" in result["context"]
+        assert "Plan B" in result["context"]
+
+    def test_parse_session_with_session_field(self, temp_project):
+        memory.cmd_session_add("todo", "Test task", session="my-session")
+
+        entries = memory.parse_session_file()
+        assert len(entries) >= 1
+        assert any(e.session == "my-session" for e in entries)
 
 
 class TestFileParsing:

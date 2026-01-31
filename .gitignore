@@ -1,6 +1,7 @@
 # Knowledge and Session (user-specific memories)
 knowledge.md
 session.md
+.claude/current_session
 
 # Python
 __pycache__/
