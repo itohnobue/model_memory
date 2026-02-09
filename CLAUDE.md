@@ -81,6 +81,26 @@ memory.sh session clear --all     # ALL sessions
 memory.sh session archive <id>    # Move to knowledge
 ```
 
+### State Checkpoints (Compaction Survival)
+
+Context compaction can erase working state mid-task. Save a checkpoint after **every significant step** so work can continue seamlessly.
+
+**When:** After each step that produces results, makes decisions, or changes direction.
+
+**What to save** (single `context` entry, replace previous checkpoint):
+
+```bash
+memory.sh session add context "CHECKPOINT: [task summary] | DONE: [completed steps] | CURRENT: [what you're doing now] | NEXT: [remaining steps] | FILES: [key files involved] | DECISIONS: [important choices made] | BLOCKERS: [if any]"
+```
+
+**After compaction** (you'll notice missing conversation history): Run `memory.sh session show` immediately and use the latest checkpoint to restore your working state before continuing.
+
+**Rules:**
+- One active checkpoint at a time — delete the previous one before adding a new one
+- Keep each checkpoint under 500 chars — be terse, use abbreviations
+- Always include DONE and NEXT — these are the minimum needed to continue
+- Do NOT skip checkpoints to save time — the cost of losing state is much higher
+
 ### Multi-Session (Parallel Work)
 
 Multiple CLI instances/agents can work without conflicts.
