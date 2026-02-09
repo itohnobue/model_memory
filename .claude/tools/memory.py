@@ -594,7 +594,7 @@ def cmd_session_show(session: str | None = None) -> dict[str, Any]:
         lines.append(f"### {cat.upper()}")
         for entry in cat_entries:
             status_str = f" [{entry.status}]" if entry.status else ""
-            lines.append(f"- {entry.id}{status_str}: {entry.content[:80]}")
+            lines.append(f"- {entry.id}{status_str}: {entry.content}")
         lines.append("")
 
     return {"context": "\n".join(lines), "session": current_session}
@@ -800,7 +800,7 @@ def cmd_session_show_all() -> dict[str, Any]:
             lines.append(f"#### {cat.upper()}")
             for entry in cat_entries:
                 status_str = f" [{entry.status}]" if entry.status else ""
-                lines.append(f"- {entry.id}{status_str}: {entry.content[:80]}")
+                lines.append(f"- {entry.id}{status_str}: {entry.content}")
             lines.append("")
 
     return {"context": "\n".join(lines)}
@@ -826,7 +826,7 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
             lines.append(f"[{r['category']}] {r['id']}")
             if r.get("tags"):
                 lines.append(f"  Tags: {', '.join(r['tags'])}")
-            content = r.get("content", "")[:200]
+            content = r.get("content", "")
             for line in content.split("\n"):
                 lines.append(f"  {line}")
             lines.append("")
@@ -838,7 +838,7 @@ def format_output(data: dict[str, Any], fmt: str = "text") -> str:
         for r in data["results"]:
             status = f" [{r['status']}]" if r.get("status") else ""
             lines.append(f"[{r['category']}] {r['id']}{status}")
-            content = r.get("content", "")[:100]
+            content = r.get("content", "")
             lines.append(f"  {content}")
             lines.append("")
         return "\n".join(lines)
