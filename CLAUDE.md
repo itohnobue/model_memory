@@ -2,26 +2,14 @@
 
 Two-tier: **Knowledge** (`knowledge.md`) permanent, **Session** (`session.md`) temporary.
 
-## Quick Decision
-
 | Question | Use |
 |----------|-----|
 | Will this help in future sessions? | **Knowledge** |
-| Is this about current task only? | **Session** |
+| Current task only? | **Session** |
 | Discovered a gotcha/pattern/config? | **Knowledge** |
 | Tracking todos/progress/blockers? | **Session** |
 
-## Before Any Task
-
-```bash
-./.claude/tools/memory.sh context "<keywords>"
-```
-
-Extract keywords from: entities, technologies, service names, error types.
-
-**Skip only for:** single-line trivial fixes.
-
-## Save to Knowledge
+## Knowledge
 
 ```bash
 memory.sh add <category> "<content>" [--tags a,b,c]
@@ -32,7 +20,7 @@ memory.sh add <category> "<content>" [--tags a,b,c]
 | `architecture` | System design, service connections, ports |
 | `gotcha` | Bugs, pitfalls, non-obvious behavior |
 | `pattern` | Code conventions, recurring structures |
-| `config` | Environment settings, credentials locations |
+| `config` | Environment settings, credentials |
 | `entity` | Important classes, functions, APIs |
 | `decision` | Why choices were made |
 | `discovery` | New findings about codebase |
@@ -40,88 +28,45 @@ memory.sh add <category> "<content>" [--tags a,b,c]
 | `reference` | Useful links, documentation |
 | `context` | Background info, project context |
 
-**Tags:** Cross-cutting concerns (e.g., `--tags redis,production,auth`).
-
-**Skip:** Trivial info, easily grep-able content, duplicates.
+**Tags:** Cross-cutting concerns (e.g., `--tags redis,production,auth`). **Skip:** Trivial, easily grep-able, duplicates.
 
 **After tasks:** State "**Memories saved:** [list]" or "**Memories saved:** None"
 
-**Stale memories:** Delete with `memory.sh delete <id>`.
-
 **Other:** `search "<query>"`, `list [--category CAT]`, `delete <id>`, `stats`
 
----
+## Session
 
-## Session Memory
+Tracks current task. Persists until cleared.
 
-Tracks current task. **Persists until explicitly cleared.**
-
-**Categories:** `plan`, `todo`, `progress`, `note`, `context`, `decision`, `blocker`
-
-**Statuses:** `pending` → `in_progress` → `completed` | `blocked`
-
-### Commands
+**Categories:** `plan`, `todo`, `progress`, `note`, `context`, `decision`, `blocker`. **Statuses:** `pending` → `in_progress` → `completed` | `blocked`.
 
 ```bash
-# Add
 memory.sh session add todo "Task" --status pending
-memory.sh session add plan "Step 1... Step 2..."
-
-# View
-memory.sh session show
-memory.sh session list [--status pending]
-
-# Update/Delete
+memory.sh session show                    # View current
 memory.sh session update <id> --status completed
 memory.sh session delete <id>
-
-# Cleanup
-memory.sh session clear           # Current session only
-memory.sh session clear --all     # ALL sessions
-memory.sh session archive <id>    # Move to knowledge
+memory.sh session clear                   # Current only
+memory.sh session clear --all             # ALL sessions
 ```
 
-### State Checkpoints (Compaction Survival)
+## Checkpoints
 
-Context compaction can erase working state mid-task. Save a checkpoint after **every significant step** so work can continue seamlessly.
-
-**When:** After each step that produces results, makes decisions, or changes direction.
-
-**What to save** (single `context` entry, replace previous checkpoint):
+Save after every significant step. One active checkpoint (delete previous first). Under 500 chars.
 
 ```bash
-memory.sh session add context "CHECKPOINT: [task summary] | DONE: [completed steps] | CURRENT: [what you're doing now] | NEXT: [remaining steps] | FILES: [key files involved] | DECISIONS: [important choices made] | BLOCKERS: [if any]"
+memory.sh session add context "CHECKPOINT: [task] | DONE: [steps] | CURRENT: [now] | NEXT: [remaining] | FILES: [key files] | DECISIONS: [choices] | BUILD/TEST: [commands]"
 ```
 
-**After compaction** (you'll notice missing conversation history): Run `memory.sh session show` immediately and use the latest checkpoint to restore your working state before continuing.
+After compaction: run `memory.sh session show` immediately to restore state.
 
-**Rules:**
-- One active checkpoint at a time — delete the previous one before adding a new one
-- Keep each checkpoint under 500 chars — be terse, use abbreviations
-- Always include DONE and NEXT — these are the minimum needed to continue
-- Do NOT skip checkpoints to save time — the cost of losing state is much higher
+**Rules:** One checkpoint at a time. Always include DONE and NEXT. Don't skip — losing state costs more.
 
-### Multi-Session (Parallel Work)
+## Multi-Session
 
-Multiple CLI instances/agents can work without conflicts.
-
-**Resolution priority:**
-1. `-S` / `--session` flag
-2. `MEMORY_SESSION` environment variable
-3. `.claude/current_session` pointer file
-4. `"default"`
+Multiple CLI instances work without conflicts. Resolution: `-S` flag > `MEMORY_SESSION` env > `.claude/current_session` file > `"default"`.
 
 ```bash
-# Interactive: switch session (saved to pointer file)
-memory.sh session use feature-auth
-
-# Agents: use env var (no pointer update)
-export MEMORY_SESSION=agent-$$
-
-# One-off: use -S flag
-memory.sh -S other session add todo "..."
-
-# View all
-memory.sh session sessions      # List sessions
-memory.sh session show-all      # Show all content
+memory.sh session use feature-auth        # Switch session
+memory.sh -S other session add todo "..." # One-off
+memory.sh session sessions                # List all
 ```
